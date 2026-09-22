@@ -59,7 +59,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     if (!settings.apiKey) { setError('未配置 API Key'); onGoSettings && onGoSettings(); return }
     setStreaming('')
     try {
-      const lore = await db.lore.toArray()
+      const lore = [...(await db.lore.toArray()), ...(session?.lore || [])] // 全局 + 本故事专属
       const api = makeApi(settings)
       const compiled = compileMessages(card, lore, session?.state, history, settings)
       // 续写：以指令消息收尾让模型顺着最后一段继续；指令不落库，不污染历史

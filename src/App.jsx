@@ -54,7 +54,7 @@ export default function App() {
             />
           : <SessionsView onSelect={selectSession} onGoChars={() => setTab('chars')} />)}
         {tab === 'state' && <StateView sessionId={sessionId} version={stateVersion} />}
-        {tab === 'lore' && <LoreView />}
+        {tab === 'lore' && <LoreView sessionId={sessionId} />}
         {tab === 'chars' && <CharView />}
         {tab === 'settings' && <SettingsView settings={settings} onChange={setSettings} />}
       </main>

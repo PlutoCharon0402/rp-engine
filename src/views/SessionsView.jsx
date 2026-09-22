@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { db } from '../lib/db'
 import { fmtTime } from '../lib/util'
+import { substMacros } from '../lib/compiler'
 
 export default function SessionsView({ onSelect, onGoChars }) {
   const [sessions, setSessions] = useState([])
   const [cards, setCards] = useState([])
   const [creating, setCreating] = useState(false)
   const [picked, setPicked] = useState(null)
+  const [greetingIdx, setGreetingIdx] = useState(0)
   const [name, setName] = useState('')
 
   async function load() {
@@ -29,11 +31,14 @@ export default function SessionsView({ onSelect, onGoChars }) {
       name: name.trim() || `${card.name}的新故事`,
       characterId: card.id,
       state,
+      lore: (card.embeddedLore || []).map((e) => ({ ...e })), // 会话级隔离：拷贝角色专属世界书
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })
-    if (card.firstMessage?.trim()) {
-      await db.messages.add({ sessionId: sid, role: 'assistant', content: card.firstMessage.trim(), turn: 1, ts: Date.now() })
+    const greetings = [card.firstMessage, ...(card.alternateGreetings || [])]
+    const chosen = (greetings[greetingIdx] || greetings[0] || '').trim()
+    if (chosen) {
+      await db.messages.add({ sessionId: sid, role: 'assistant', content: substMacros(chosen, card), turn: 1, ts: Date.now() })
     }
     onSelect(sid)
   }
@@ -46,11 +51,14 @@ export default function SessionsView({ onSelect, onGoChars }) {
     load()
   }
 
+  const pickedCard = picked ? cards.find((c) => c.id === picked) : null
+  const greetings = pickedCard ? [pickedCard.firstMessage, ...(pickedCard.alternateGreetings || [])].filter((g) => g?.trim()) : []
+
   return (
     <div className="view">
       <div className="view-head">
         <h2>会话</h2>
-        <button className="btn primary" onClick={() => { setCreating(true); setPicked(null); setName('') }}>＋ 新故事</button>
+        <button className="btn primary" onClick={() => { setCreating(true); setPicked(null); setGreetingIdx(0); setName('') }}>＋ 新故事</button>
       </div>
 
       {creating && (
@@ -67,7 +75,7 @@ export default function SessionsView({ onSelect, onGoChars }) {
                 <div className="card-list">
                   {cards.map((c) => (
                     <label key={c.id} className={`pick-row ${picked === c.id ? 'picked' : ''}`}>
-                      <input type="radio" name="card" checked={picked === c.id} onChange={() => setPicked(c.id)} />
+                      <input type="radio" name="card" checked={picked === c.id} onChange={() => { setPicked(c.id); setGreetingIdx(0) }} />
                       <div>
                         <b>{c.name}</b>
                         <div className="muted ellipsis">{c.scenario || c.description || '（无设定）'}</div>
@@ -75,6 +83,24 @@ export default function SessionsView({ onSelect, onGoChars }) {
                     </label>
                   ))}
                 </div>
+
+                {greetings.length > 1 && (
+                  <>
+                    <label className="lbl">选择开场白</label>
+                    <div className="card-list">
+                      {greetings.map((g, i) => (
+                        <label key={i} className={`pick-row ${greetingIdx === i ? 'picked' : ''}`} style={{ alignItems: 'flex-start' }}>
+                          <input type="radio" name="greeting" checked={greetingIdx === i} onChange={() => setGreetingIdx(i)} />
+                          <div className="small" style={{ maxHeight: '4.5em', overflow: 'hidden' }}>{g.replace(/\n+/g, ' ').slice(0, 120)}…</div>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {pickedCard?.embeddedLore?.length > 0 && (
+                  <p className="muted small">将带入 {pickedCard.embeddedLore.length} 条该角色专属的世界书条目（仅本故事可见）。</p>
+                )}
                 <input className="input" placeholder="故事名（可留空）" value={name} onChange={(e) => setName(e.target.value)} />
                 <div className="row-end">
                   <button className="btn" onClick={() => setCreating(false)}>取消</button>
@@ -97,7 +123,7 @@ export default function SessionsView({ onSelect, onGoChars }) {
           <div key={s.id} className="list-row">
             <button className="list-main" onClick={() => onSelect(s.id)}>
               <b>{s.name}</b>
-              <span className="muted">{fmtTime(s.updatedAt)} · {Object.keys(s.state?.characters || {}).length} 个角色在册</span>
+              <span className="muted">{fmtTime(s.updatedAt)} · {Object.keys(s.state?.characters || {}).length} 个角色在册{s.lore?.length ? ` · 专属世界书 ${s.lore.length} 条` : ''}</span>
             </button>
             <button className="icon-btn danger" onClick={() => remove(s.id)}>✕</button>
           </div>

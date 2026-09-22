@@ -2,13 +2,21 @@
 import { estTokens } from './util'
 import { emptyState } from './db'
 
+/** 宏替换：{{char}}→角色名，{{user}}→「你」（酒馆卡导入后保留宏，编译时才展开） */
+export function substMacros(text, card) {
+  if (!text) return text
+  return String(text)
+    .replace(/\{\{char\}\}/gi, card?.name || '角色')
+    .replace(/\{\{user\}\}/gi, '你')
+}
+
 export function cardText(card) {
   const p = []
   p.push('你正在与用户进行沉浸式角色扮演。保持角色一致，用生动的叙述推进剧情，不要跳出角色，不要替用户角色说话或行动，不要复述用户的话。')
-  p.push(`## 你扮演的角色\n姓名：${card.name || '未命名'}\n${card.description ? `外貌与背景：${card.description}\n` : ''}${card.personality ? `性格与说话方式：${card.personality}` : ''}`)
-  if (card.scenario) p.push(`## 世界观与当前场景\n${card.scenario}`)
-  if (card.userPersona) p.push(`## 用户扮演的角色\n${card.userPersona}`)
-  if (card.styleExamples) p.push(`## 文风示例\n${card.styleExamples}`)
+  p.push(substMacros(`## 你扮演的角色\n姓名：${card.name || '未命名'}\n${card.description ? `外貌与背景：${card.description}\n` : ''}${card.personality ? `性格与说话方式：${card.personality}` : ''}`, card))
+  if (card.scenario) p.push(substMacros(`## 世界观与当前场景\n${card.scenario}`, card))
+  if (card.userPersona) p.push(substMacros(`## 用户扮演的角色\n${card.userPersona}`, card))
+  if (card.styleExamples) p.push(substMacros(`## 文风示例\n${card.styleExamples}`, card))
   return p.filter(Boolean).join('\n\n')
 }
 
@@ -65,7 +73,7 @@ export function stateSummary(state) {
  * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息。
  */
 export function compileMessages(card, lore, state, history, settings) {
-  const constant = (lore || []).filter((e) => e.enabled !== false && e.constant).map((e) => e.content)
+  const constant = (lore || []).filter((e) => e.enabled !== false && e.constant).map((e) => substMacros(e.content, card))
   const messages = [{ role: 'system', content: [cardText(card), ...constant].filter(Boolean).join('\n\n') }]
 
   const hist = (history || [])
@@ -82,7 +90,7 @@ export function compileMessages(card, lore, state, history, settings) {
   const triggered = matchLore(lore, scanText, settings.loreBudget ?? 600)
   const dyn = [
     stateSummary(state),
-    triggered.length && `## 世界书补充设定\n${triggered.join('\n\n')}`,
+    triggered.length && `## 世界书补充设定\n${triggered.map((t) => substMacros(t, card)).join('\n\n')}`,
   ].filter(Boolean).join('\n\n')
 
   for (const m of head) messages.push({ role: m.role, content: m.content })
