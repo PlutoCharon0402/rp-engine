@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { db } from '../lib/db'
 import { fmtTime } from '../lib/util'
 import { substMacros } from '../lib/compiler'
+import { buildSessionExport, transcriptText, downloadFile, safeFileName, importSessionFile } from '../lib/sessionIO'
 
 export default function SessionsView({ onSelect, onGoChars }) {
   const [sessions, setSessions] = useState([])
@@ -10,6 +11,9 @@ export default function SessionsView({ onSelect, onGoChars }) {
   const [picked, setPicked] = useState(null)
   const [greetingIdx, setGreetingIdx] = useState(0)
   const [name, setName] = useState('')
+  const [exportTarget, setExportTarget] = useState(null) // 待导出会话 id → 弹格式选择
+  const [importErr, setImportErr] = useState('')
+  const fileRef = useRef(null)
 
   async function load() {
     setSessions(await db.sessions.orderBy('updatedAt').reverse().toArray())
@@ -43,6 +47,31 @@ export default function SessionsView({ onSelect, onGoChars }) {
     onSelect(sid)
   }
 
+  async function exportAs(fmt) {
+    const sid = exportTarget
+    setExportTarget(null)
+    try {
+      const exp = await buildSessionExport(sid)
+      if (fmt === 'txt') {
+        downloadFile(`${safeFileName(exp.session.name)}.txt`, transcriptText(exp), 'text/plain')
+      } else {
+        downloadFile(`${safeFileName(exp.session.name)}.session.json`, JSON.stringify(exp), 'application/json')
+      }
+    } catch (e) {
+      alert(`导出失败：${e.message}`)
+    }
+  }
+
+  async function onImportFile(file) {
+    setImportErr('')
+    try {
+      const sid = await importSessionFile(file)
+      onSelect(sid)
+    } catch (e) {
+      setImportErr(`导入失败：${e.message}`)
+    }
+  }
+
   async function remove(id) {
     if (!confirm('删除该会话及其全部消息？此操作不可撤销。')) return
     await db.messages.where('sessionId').equals(id).delete()
@@ -58,8 +87,34 @@ export default function SessionsView({ onSelect, onGoChars }) {
     <div className="view">
       <div className="view-head">
         <h2>会话</h2>
-        <button className="btn primary" onClick={() => { setCreating(true); setPicked(null); setGreetingIdx(0); setName('') }}>＋ 新故事</button>
+        <div className="head-actions">
+          <button className="btn" onClick={() => fileRef.current?.click()}>导入记录</button>
+          <button className="btn primary" onClick={() => { setCreating(true); setPicked(null); setGreetingIdx(0); setName('') }}>＋ 新故事</button>
+        </div>
+        <input ref={fileRef} type="file" accept=".json,application/json" hidden
+          onChange={(e) => { if (e.target.files[0]) onImportFile(e.target.files[0]); e.target.value = '' }} />
       </div>
+      {importErr && <div className="banner error" onClick={() => setImportErr('')}>{importErr}</div>}
+
+      {exportTarget && (
+        <div className="modal-mask" onClick={() => setExportTarget(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>导出聊天记录</h3>
+            <button className="pick-row" style={{ width: '100%' }} onClick={() => exportAs('json')}>
+              <div>
+                <b>JSON（含世界状态与专属世界书）</b>
+                <div className="muted">无损备份，可在任意设备再次导入继续玩</div>
+              </div>
+            </button>
+            <button className="pick-row" style={{ width: '100%' }} onClick={() => exportAs('txt')}>
+              <div>
+                <b>纯文本（仅对话）</b>
+                <div className="muted">可读的聊天记录，适合存档或分享</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {creating && (
         <div className="modal-mask" onClick={() => setCreating(false)}>
@@ -125,6 +180,7 @@ export default function SessionsView({ onSelect, onGoChars }) {
               <b>{s.name}</b>
               <span className="muted">{fmtTime(s.updatedAt)} · {Object.keys(s.state?.characters || {}).length} 个角色在册{s.lore?.length ? ` · 专属世界书 ${s.lore.length} 条` : ''}</span>
             </button>
+            <button className="icon-btn" title="导出" onClick={() => setExportTarget(s.id)}>↓</button>
             <button className="icon-btn danger" onClick={() => remove(s.id)}>✕</button>
           </div>
         ))}
