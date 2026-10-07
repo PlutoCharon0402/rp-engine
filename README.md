@@ -24,7 +24,31 @@ npm install
 npm run dev      # 开发服务器
 npm run build    # 产物在 dist/
 npm run preview  # 本地预览构建产物
+npm run test     # 单元测试（vitest）
 ```
+
+### ⚠️ 环境准备：换机器 / 换平台一律重装依赖
+
+`node_modules/` **不可跨机器、跨平台拷贝**（也不要从容器、CI 产物、共享卷里拷出来用）。
+npm 对 `@rollup/*`、`@esbuild/*` 这类**平台相关的可选依赖**按「安装时的 host 平台」裁剪，
+在 Linux 上装出来的目录拿到 macOS 上会 `MODULE_NOT_FOUND: rollup-darwin-arm64`。
+
+```bash
+rm -rf node_modules && npm ci     # 换机器 / 换平台 / 出现 MODULE_NOT_FOUND 时的标准动作
+```
+
+`.npmrc` 已开 `engine-strict=true`，Node < 18.18 会直接报错而不是装出残缺依赖树。
+
+## 数据库迁移规则（改 `src/lib/db.js` 前必读）
+
+1. `db.version(1)` **永远不要改**。改了它，存量用户打开会抛 `VersionError` —— 全库不可访问，且没有导出入口。
+2. 要新增 / 删除 / 改名**索引**，或新增**表** → 追加 `db.version(n + 1).stores(...)`。
+3. 只给记录**新增普通字段**（不用于 `where` / `orderBy`）→ **不需要升版本**，直接写即可，旧代码读取时自动忽略。
+   例：`session.cardSnapshot`、`lore[].uid`、`task.attempts` 都是这么加的。
+4. `version(n)` 一旦发布就**不可回退**：本地库版本号只增不减，回退代码会抛 `VersionError`。
+5. **改了 `db.js` 必须重新构建并整体发布**：Service Worker 的缓存名由 `vite.config.js`
+   在构建时注入（`package.json` 版本 + 构建时刻），**不需要手工改 `public/sw.js`**。
+   旧 bundle（只声明到 v1）打开已升到 v2 的库会直接崩，所以二者必须同批发布。
 
 ## 部署到手机（PWA 安装）
 
@@ -42,7 +66,11 @@ PWA 安装需要 HTTPS，推荐 Cloudflare Pages（免费）：
 
 - CORS：DeepSeek API 已验证允许浏览器跨域直连（含 Authorization 头），无需代理。接口地址可在设置中改为任何 OpenAI 兼容服务。
 - 隐私：API Key 仅存本机 localStorage，所有数据仅存本机 IndexedDB，不经过任何第三方服务器。
-- 提取器使用 `response_format: json_object`、temperature 0，输出 diff 后幂等应用到状态库。
+- 提取器使用 `response_format: json_object`、temperature 0，输出 diff 后应用到状态库。
+- 角色卡与已开始的故事**解耦**：开新故事时把角色卡快照进 `session.cardSnapshot`，
+  之后编辑 / 删除原卡都不影响进行中的故事；删除角色卡时也会自动补快照并解引用。
+- dev server 下可在 Console 用 `window.__db`（完整的 Dexie 实例）查数据；生产构建下不存在，
+  验证请改用原生 IndexedDB。
 
 ## 路线图（未实现）
 

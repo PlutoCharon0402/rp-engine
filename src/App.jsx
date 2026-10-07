@@ -40,6 +40,15 @@ export default function App() {
     else localStorage.removeItem('rp.sessionId')
   }
 
+  // 全量导入后：旧会话 id 已随库一起被替换，rp.sessionId 必然悬空 → 清空并回到会话列表，
+  // 否则发消息会写入谁也看不到的鬼影消息（P0-1 场景 C）
+  function handleDataImported() {
+    localStorage.removeItem('rp.sessionId')
+    setSessionId(null)
+    setTab('chat')
+    setStateVersion((v) => v + 1)
+  }
+
   return (
     <div className="app">
       <main>
@@ -56,7 +65,7 @@ export default function App() {
         {tab === 'state' && <StateView sessionId={sessionId} version={stateVersion} />}
         {tab === 'lore' && <LoreView sessionId={sessionId} />}
         {tab === 'chars' && <CharView />}
-        {tab === 'settings' && <SettingsView settings={settings} onChange={setSettings} />}
+        {tab === 'settings' && <SettingsView settings={settings} onChange={setSettings} onDataImported={handleDataImported} />}
       </main>
       <nav className="tabbar">
         {TABS.map((t) => (

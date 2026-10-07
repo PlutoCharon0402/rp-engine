@@ -10,13 +10,15 @@ export function substMacros(text, card) {
     .replace(/\{\{user\}\}/gi, '你')
 }
 
+/** 角色卡 → 静态前缀文本。对 null / undefined / 空对象都必须返回兜底文本，绝不抛错 */
 export function cardText(card) {
+  const c = card || {}
   const p = []
   p.push('你正在与用户进行沉浸式角色扮演。保持角色一致，用生动的叙述推进剧情，不要跳出角色，不要替用户角色说话或行动，不要复述用户的话。')
-  p.push(substMacros(`## 你扮演的角色\n姓名：${card.name || '未命名'}\n${card.description ? `外貌与背景：${card.description}\n` : ''}${card.personality ? `性格与说话方式：${card.personality}` : ''}`, card))
-  if (card.scenario) p.push(substMacros(`## 世界观与当前场景\n${card.scenario}`, card))
-  if (card.userPersona) p.push(substMacros(`## 用户扮演的角色\n${card.userPersona}`, card))
-  if (card.styleExamples) p.push(substMacros(`## 文风示例\n${card.styleExamples}`, card))
+  p.push(substMacros(`## 你扮演的角色\n姓名：${c.name || '未命名'}\n${c.description ? `外貌与背景：${c.description}\n` : ''}${c.personality ? `性格与说话方式：${c.personality}` : ''}`, c))
+  if (c.scenario) p.push(substMacros(`## 世界观与当前场景\n${c.scenario}`, c))
+  if (c.userPersona) p.push(substMacros(`## 用户扮演的角色\n${c.userPersona}`, c))
+  if (c.styleExamples) p.push(substMacros(`## 文风示例\n${c.styleExamples}`, c))
   return p.filter(Boolean).join('\n\n')
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { db } from '../lib/db'
 import { parseCardFile } from '../lib/cardImport'
+import { countSessionsUsingCard, detachCard } from '../lib/cardRef'
 
 const blank = { name: '', description: '', personality: '', scenario: '', firstMessage: '', styleExamples: '', userPersona: '', alternateGreetings: [], embeddedLore: [] }
 
@@ -38,8 +39,25 @@ export default function CharView() {
     load()
   }
 
+  /**
+   * 删除角色卡。旧文案「不影响已开始的故事」是错误承诺——删完会话就永久不可用。
+   * 现在：先如实告知有多少个故事在用，再把卡快照进这些会话并解引用，最后才删卡。
+   */
   async function remove(id) {
-    if (!confirm('删除该角色卡？（不影响已开始的故事）')) return
+    const card = cards.find((c) => c.id === id)
+    const name = card?.name || '该角色卡'
+    const used = await countSessionsUsingCard(id)
+    if (used) {
+      const ok = confirm(
+        `有 ${used} 个故事正在使用「${name}」。\n\n` +
+        '删除后，这些故事会继续使用自己的角色卡快照运行（人设与开场设定保留，' +
+        '之后编辑本卡不会影响它们）。已有聊天记录与世界状态不受影响。\n\n确定删除？'
+      )
+      if (!ok) return
+    } else if (!confirm(`删除角色卡「${name}」？`)) {
+      return
+    }
+    await detachCard(id) // 先快照 + 解引用（无会话引用时是空操作）
     await db.characters.delete(id)
     load()
   }

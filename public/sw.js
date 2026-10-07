@@ -1,4 +1,8 @@
-const CACHE = 'rp-engine-v2'
+// ⚠️ 缓存名不要手工改：版本占位符由 vite.config.js 在构建时注入
+// （package.json 版本 + 构建时刻），每次构建都不同，新产物必定触发 install/activate。
+// public/ 下的文件不参与 Vite 编译，所以由 swVersionPlugin 在写出阶段替换该占位符。
+// dev server 下 sw.js 未经替换，typeof 守卫保证不会 ReferenceError（退化成 'dev' 缓存名）。
+const CACHE = 'rp-engine-v' + (typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev')
 const CORE = ['./', './index.html', './manifest.webmanifest', './icon.svg']
 
 self.addEventListener('install', (e) => {

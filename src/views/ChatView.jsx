@@ -3,12 +3,14 @@ import { db, getMessages } from '../lib/db'
 import { compileMessages } from '../lib/compiler'
 import { processPendingTasks } from '../lib/extractor'
 import { makeApi } from '../lib/api'
+import { resolveCard, CARD_SOURCE_LABEL } from '../lib/cardRef'
 
 const QUICK_CHIPS = ['（请继续）', '（时间推进到次日）', '（切换场景）']
 
 export default function ChatView({ sessionId, settings, onExit, onSessionUpdate, onGoSettings }) {
   const [session, setSession] = useState(null)
   const [card, setCard] = useState(null)
+  const [cardSource, setCardSource] = useState('none') // live | detached | snapshot | missing | none
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(null) // null=未在生成，string=增量文本
@@ -22,7 +24,10 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     (async () => {
       const s = await db.sessions.get(sessionId)
       setSession(s)
-      setCard(s ? await db.characters.get(s.characterId) : null)
+      // 读时兜底：快照 → 原卡 → 缺失。角色卡被删也不会拿到 undefined 而崩在编译器里
+      const { card: resolved, source } = await resolveCard(s)
+      setCard(resolved)
+      setCardSource(source)
       setMessages(await getMessages(sessionId))
       setError('')
       // 补跑上次未完成的状态提取
@@ -57,6 +62,8 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
 
   async function streamReply(history, opts = {}) {
     if (!settings.apiKey) { setError('未配置 API Key'); onGoSettings && onGoSettings(); return }
+    // 无角色卡可用：直接拒绝，绝不留一条永远收不到回复的孤儿用户消息
+    if (cardSource === 'missing') { setError(CARD_SOURCE_LABEL.missing); return }
     setStreaming('')
     try {
       const lore = [...(await db.lore.toArray()), ...(session?.lore || [])] // 全局 + 本故事专属
@@ -87,6 +94,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
   async function send(text) {
     const content = (text ?? input).trim()
     if (!content || busy || !sessionId) return
+    if (cardSource === 'missing') { setError(CARD_SOURCE_LABEL.missing); return }
     setInput('')
     setError('')
     const userMsg = { sessionId, role: 'user', content, turn: messages.length + 1, ts: Date.now() }
@@ -136,10 +144,12 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
             {extracting ? '状态提取中…' : card?.name || ''}
             {usage && !extracting && ` · 缓存命中 ${usage.prompt_cache_hit_tokens ?? 0}/${(usage.prompt_cache_hit_tokens ?? 0) + (usage.prompt_cache_miss_tokens ?? 0)} tokens`}
           </span>
+          {cardSource === 'snapshot' && <span className="badge">{CARD_SOURCE_LABEL.snapshot}</span>}
+          {cardSource === 'missing' && <span className="badge err">{CARD_SOURCE_LABEL.missing}</span>}
         </div>
         <div className="head-actions">
-          <button className="btn small" onClick={continueStory} disabled={busy || !messages.length}>续写</button>
-          <button className="btn small" onClick={regenerate} disabled={busy || !messages.length}>重生成</button>
+          <button className="btn small" onClick={continueStory} disabled={busy || !messages.length || cardSource === 'missing'}>续写</button>
+          <button className="btn small" onClick={regenerate} disabled={busy || !messages.length || cardSource === 'missing'}>重生成</button>
         </div>
       </header>
 
@@ -185,7 +195,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send() } }}
           />
-          <button className="btn primary send" disabled={busy || !input.trim()} onClick={() => send()}>发送</button>
+          <button className="btn primary send" disabled={busy || !input.trim() || cardSource === 'missing'} onClick={() => send()}>发送</button>
         </div>
       </div>
     </div>
