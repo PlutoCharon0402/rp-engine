@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { db } from '../lib/db'
 import { DEFAULT_SETTINGS } from '../lib/util'
 import { validateDump, importDump } from '../lib/backup'
@@ -10,6 +10,31 @@ export default function SettingsView({ settings, onChange, onDataImported }) {
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState(null) // { ok, text }
   const [importing, setImporting] = useState(false) // 导入中：防连点重复清库
+  const [failedCount, setFailedCount] = useState(0) // failed 提取任务数（T2-2 自愈入口）
+  const [retrying, setRetrying] = useState(false)
+
+  // 进入设置页时查一次失败任务数；重试入口依赖它显示
+  useEffect(() => {
+    (async () => {
+      try { setFailedCount(await db.tasks.where('status').equals('failed').count()) } catch { /* 库未就绪时静默 */ }
+    })()
+  }, [])
+
+  /** T2-2 failed 任务自愈入口：重置为 pending 并清零 attempts，用户回到对话页后自动补跑 */
+  async function retryFailedTasks() {
+    if (retrying || !failedCount) return
+    setRetrying(true)
+    try {
+      await db.tasks.where('status').equals('failed')
+        .modify((t) => { t.status = 'pending'; t.attempts = 0; t.error = null })
+      setMsg({ ok: true, text: `已重置 ${failedCount} 条失败任务。回到「对话」页进入故事后将自动补跑。` })
+      setFailedCount(0)
+    } catch (e) {
+      setMsg({ ok: false, text: `重置失败任务时出错：${e.message}` })
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   function set(k, v) { onChange({ ...settings, [k]: v }) }
 
@@ -147,6 +172,16 @@ export default function SettingsView({ settings, onChange, onDataImported }) {
       <p className="muted small">角色卡与常驻世界书放在 prompt 静态前缀以命中 DeepSeek 前缀缓存；历史消息只增不改，同样是可缓存前缀。状态与触发条目注入在最后 depth 条消息之前（默认 1，即紧贴最新用户消息）——每轮仅这部分与新增消息按全价计费。</p>
 
       <h3>数据</h3>
+      {failedCount > 0 && (
+        <div className="banner error">
+          有 {failedCount} 条状态提取任务失败（通常是 API Key 余额 / 网络问题）。修复后可重试：
+          <div className="row-end" style={{ marginTop: 8 }}>
+            <button className="btn small" disabled={retrying} onClick={retryFailedTasks}>
+              {retrying ? '重置中…' : `重试失败任务（${failedCount} 条）`}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="row">
         <button className="btn" disabled={importing} onClick={exportData}>导出备份</button>
         <button className="btn" disabled={importing} onClick={() => fileRef.current?.click()}>{importing ? '导入中…' : '导入备份'}</button>

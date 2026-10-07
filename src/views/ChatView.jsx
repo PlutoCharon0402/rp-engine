@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { db, getMessages } from '../lib/db'
 import { compileMessages } from '../lib/compiler'
-import { processPendingTasks } from '../lib/extractor'
+import { processPendingTasks, enqueueTask } from '../lib/extractor'
 import { makeApi } from '../lib/api'
 import { resolveCard, CARD_SOURCE_LABEL } from '../lib/cardRef'
 
@@ -52,7 +52,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     ;(async () => {
       try {
         if (!catchUpOnly && userMsg && aMsg) {
-          await db.tasks.add({ sessionId, userMsgId: userMsg.id, assistantMsgId: aMsg.id, status: 'pending', ts: Date.now() })
+          await enqueueTask(sessionId, userMsg.id, aMsg.id) // 入队去重：同 assistantMsgId 不重复入队
         }
         await processPendingTasks(sessionId, settings, refreshSession)
       } catch { /* 提取失败不阻塞对话，任务保持 pending，下次补跑 */ }
@@ -122,11 +122,11 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       removed.push(m.id)
       await db.messages.delete(m.id)
     }
-    // 清掉指向已删消息的提取任务，避免悬挂
+    // 清掉指向已删消息的提取任务，避免悬挂（pending / running / failed 都要清，done 除外）
     if (removed.length) {
       const tasks = await db.tasks.where('sessionId').equals(sessionId).toArray()
       for (const t of tasks) {
-        if (t.status === 'pending' && removed.includes(t.assistantMsgId)) await db.tasks.delete(t.id)
+        if (t.status !== 'done' && removed.includes(t.assistantMsgId)) await db.tasks.delete(t.id)
       }
     }
     if (!h.length) { setMessages([]); return }
