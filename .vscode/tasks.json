@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev",
+      "type": "npm",
+      "script": "dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "detail": "启动 Vite 开发服务器 http://localhost:5173"
+    },
+    {
+      "label": "build",
+      "type": "npm",
+      "script": "build",
+      "group": { "kind": "build", "isDefault": true },
+      "detail": "产出静态站点 dist/（push 到 main 会触发 GitHub Pages 部署）"
+    },
+    {
+      "label": "preview",
+      "type": "npm",
+      "script": "preview",
+      "detail": "本地预览构建产物"
+    },
+    {
+      "label": "test",
+      "type": "npm",
+      "script": "test",
+      "group": { "kind": "test", "isDefault": true },
+      "detail": "vitest 单元测试（27 项）"
+    }
+  ]
+}

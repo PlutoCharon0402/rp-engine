@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Vite Dev (Chrome)",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "dev"
+    },
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Vite Dev (Edge)",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "dev",
+      "runtimeExecutable": "edge"
+    }
+  ]
+}
