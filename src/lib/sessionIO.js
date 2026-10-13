@@ -4,6 +4,7 @@
 import { db, getMessages } from './db'
 import { normalizeLore } from './lore'
 import { snapshotOf } from './cardRef'
+import { emptyUsage } from './util'
 
 /** 构建无损导出对象 */
 export async function buildSessionExport(sessionId) {
@@ -22,6 +23,7 @@ export async function buildSessionExport(sessionId) {
       name: session.name,
       state: session.state,
       lore: normalizeLore(session.lore || []), // 导出即规范化，保证再导入后删 1 条只掉 1 条
+      summary: session.summary || '',          // 批次4：早期剧情摘要（导入后进度归零，摘要本身保留）
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     },
@@ -85,6 +87,10 @@ export async function importSessionFile(file) {
     cardSnapshot: snapshotOf(card),
     state: exp.session?.state || { characters: {}, facts: [], events: [], relations: [] },
     lore: normalizeLore(exp.session?.lore), // 老导出文件可能无 uid，导入时补齐
+    params: {},           // 导入的故事默认全部跟随全局参数
+    usage: emptyUsage(),  // 导入的故事从零开始统计
+    summary: exp.session?.summary || '',
+    summaryUpTo: 0,       // 消息 id 是新建的，旧摘要进度无意义
     createdAt: exp.session?.createdAt || now,
     updatedAt: now,
   })

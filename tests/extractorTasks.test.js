@@ -4,7 +4,7 @@
 import 'fake-indexeddb/auto'
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from 'vitest'
 import { db } from '../src/lib/db.js'
-import { enqueueTask, claimTask, failureStatus } from '../src/lib/extractor.js'
+import { enqueueTask, claimTask, failureStatus, pendingSessionIds } from '../src/lib/extractor.js'
 
 beforeAll(async () => { await db.open() })
 afterAll(async () => { await db.delete(); db.close() })
@@ -59,5 +59,26 @@ describe('T4 · 任务队列（P0-4）', () => {
     expect(failureStatus(2)).toBe('pending')
     expect(failureStatus(3)).toBe('failed')
     expect(failureStatus(4)).toBe('failed')
+  })
+
+  // 批次3 · 全局补跑：App 启动时据此决定给哪些会话跑提取
+  describe('pendingSessionIds（全局补跑）', () => {
+    it('按会话去重，只收 pending', () => {
+      const tasks = [
+        { sessionId: 1, status: 'pending' },
+        { sessionId: 1, status: 'pending' },
+        { sessionId: 2, status: 'pending' },
+        { sessionId: 3, status: 'running' },
+        { sessionId: 4, status: 'failed' },
+        { sessionId: 5, status: 'done' },
+      ]
+      expect(pendingSessionIds(tasks)).toEqual([1, 2])
+    })
+
+    it('过滤 sessionId 缺失的脏任务，空输入返回空数组', () => {
+      expect(pendingSessionIds([{ status: 'pending' }, null, { sessionId: null, status: 'pending' }])).toEqual([])
+      expect(pendingSessionIds(null)).toEqual([])
+      expect(pendingSessionIds([])).toEqual([])
+    })
   })
 })

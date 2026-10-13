@@ -10,15 +10,22 @@
 import { db, getMessages, emptyState } from './db'
 import { makeApi } from './api'
 
-const EXTRACTOR_SYS = `你是角色扮演游戏的状态记录器。读取最近一轮对话与当前世界状态，提取其中新发生的变化。
+export const EXTRACTOR_SYS = `你是角色扮演游戏的状态记录器。读取最近一轮对话与当前世界状态，提取其中新发生的变化。
 只输出严格 JSON，不输出任何其他文字、注释或代码块标记。格式：
-{"characters":{"角色名":{"location":"当前位置","mood":"情绪","goal":"当前目标","inventory_add":["获得物品"],"knows_add":["新获知的信息"]}},"facts_add":["新确立的世界事实"],"events_add":["发生的事件"]}
+{"characters":{"角色名":{"location":"当前位置","mood":"情绪","goal":"当前目标","inventory_add":["获得物品"],"knows_add":["新获知的信息"]}},"facts_add":["新确立的世界事实"],"events_add":["发生的事件"],"relations_add":[{"from":"角色A","to":"角色B","desc":"两人当前的关系"}]}
 规则：
 - 只记录本轮新发生的变化，无变化时输出 {}
 - 字段均可省略；只输出有值的字段
 - knows 只记录角色在剧情中实际获知的信息，不要推断
 - facts 是世界观层面的事实，events 是本回合发生的具体事件
+- relations 只在本轮**明确出现或明确改变**人物关系时才输出；同一对人物再次给出即覆盖旧关系
 - 角色名以剧情中出现的称呼为准，保持与现有状态中的名字一致`
+
+/** 生效的提取提示词：用户自定义（批次7）优先，留空用内置 */
+export function extractorSys(settings) {
+  const custom = String(settings?.extractorPrompt || '').trim()
+  return custom || EXTRACTOR_SYS
+}
 
 const MAX_ATTEMPTS = 3
 
@@ -66,6 +73,24 @@ export function applyDiff(state, diff, turn) {
     factKeys.add(key)
     s.facts.push({ turn, text })
   }
+  // relations：按 (from, to) 定位，重复给出即覆盖 desc（关系"演变"而非堆积）。
+  // 覆盖式写入天然幂等：同一 diff 重放结果完全一致。
+  for (const r of diff.relations_add || []) {
+    if (!r || typeof r !== 'object') continue
+    const item = {
+      from: String(r.from ?? '').trim(),
+      to: String(r.to ?? '').trim(),
+      desc: String(r.desc ?? '').trim(),
+    }
+    if (!item.from || !item.to) continue
+    const i = s.relations.findIndex((x) => x && x.from === item.from && x.to === item.to)
+    if (i >= 0) {
+      if (s.relations[i].desc !== item.desc) s.relations[i] = { ...s.relations[i], desc: item.desc, turn }
+    } else {
+      s.relations.push({ ...item, turn })
+    }
+  }
+
   const eventKeys = new Set(s.events.map((e) => entryKey(e.turn, e.text)))
   for (const e of diff.events_add || []) {
     if (!e || !String(e).trim()) continue
@@ -76,6 +101,18 @@ export function applyDiff(state, diff, turn) {
     s.events.push({ turn, text })
   }
   return s
+}
+
+/**
+ * 从任务表快照里取出"有待补跑任务的会话 id"：去重、过滤掉 sessionId 缺失的脏记录。
+ * 纯函数（零 IndexedDB 依赖），供 App 启动时的全局补跑使用。
+ */
+export function pendingSessionIds(tasks) {
+  return [...new Set(
+    (tasks || [])
+      .filter((t) => t && t.status === 'pending' && t.sessionId != null)
+      .map((t) => t.sessionId)
+  )]
 }
 
 /** 入队去重：同一 (sessionId, assistantMsgId) 已有未完成任务时不重复入队，返回任务 id */
@@ -120,6 +157,79 @@ export async function processPendingTasks(sessionId, settings, onUpdate) {
   try { await run } finally { if (inflight.get(sessionId) === run) inflight.delete(sessionId) }
 }
 
+/** 单轮提取：调用模型拿 diff（不写库）。runPendingTasks 与回溯重放共用 */
+async function extractRound(api, sys, state, userMsg, aMsg, sessionId) {
+  const content = `## 最近一轮对话\n用户：${userMsg.content}\n角色：${aMsg.content}\n\n## 当前状态\n${JSON.stringify(state || emptyState())}`
+  const raw = await api.complete(
+    [{ role: 'system', content: sys }, { role: 'user', content }],
+    // purpose=extract：路由层可让状态提取走另一家（如更便宜的）模型
+    { json: true, temperature: 0, purpose: 'extract', metadata: { sessionId } }
+  )
+  return parseJsonLoose(raw)
+}
+
+/**
+ * 回溯提取（批次7）：从 stateLog 覆盖的某个回合起，用当前提取器重放之后的全部轮次。
+ * 起点状态取该回合 log 条目里的「提取前快照」，因此重放与当初的路径无关、结果可复现。
+ * 用途：换了提示词 / 换了模型 / 当轮提取错了，从任意记录点推倒重来。
+ * @returns {Promise<number>} 重放的轮数
+ */
+export async function reExtractFrom(sessionId, fromTurn, settings, onProgress) {
+  const session = await db.sessions.get(sessionId)
+  if (!session) throw new Error('会话不存在')
+  const entry = (session.stateLog || []).find((e) => e.turn === fromTurn)
+  if (!entry) throw new Error('没有该回合的提取记录（可回溯范围仅限最近 20 次提取）')
+
+  const msgs = await getMessages(sessionId)
+  // 按回合配对 user / assistant（同一轮消息的 turn 相同）
+  const byTurn = new Map()
+  for (const m of msgs) {
+    if (!m.turn) continue
+    const pair = byTurn.get(m.turn) || {}
+    pair[m.role] = m
+    byTurn.set(m.turn, pair)
+  }
+  const turns = [...byTurn.keys()]
+    .filter((t) => t >= fromTurn && byTurn.get(t).user && byTurn.get(t).assistant)
+    .sort((a, b) => a - b)
+  if (!turns.length) throw new Error('该回合之后没有完整的对话轮')
+
+  const api = makeApi(settings)
+  const sys = extractorSys(settings)
+  let state = entry.snapshot
+  const newLog = []
+  let done = 0
+  for (const t of turns) {
+    const { user, assistant } = byTurn.get(t)
+    const diff = await extractRound(api, sys, state, user, assistant, sessionId)
+    const before = state
+    state = applyDiff(state, diff, t)
+    newLog.push({ turn: t, ts: Date.now(), diff, snapshot: before })
+    done += 1
+    onProgress && onProgress(done, turns.length)
+  }
+  // 合并审计日志：起点之前的旧记录保留，之后全部由重放结果替换；仍只留最近 20 条
+  const merged = [...(session.stateLog || []).filter((e) => e.turn < fromTurn), ...newLog].slice(-20)
+  await db.sessions.update(sessionId, { state, stateLog: merged, updatedAt: Date.now() })
+  return turns.length
+}
+
+/**
+ * 撤销一次提取（批次7）：回到该次提取**之前**的状态，并丢弃该次及之后的记录。
+ * 之后可从更早的记录点回溯重放（reExtractFrom）。
+ */
+export async function undoExtract(sessionId, turn) {
+  const session = await db.sessions.get(sessionId)
+  const log = session?.stateLog || []
+  const entry = log.find((e) => e.turn === turn)
+  if (!entry) throw new Error('没有该回合的提取记录')
+  await db.sessions.update(sessionId, {
+    state: entry.snapshot,
+    stateLog: log.filter((e) => e.turn < turn).slice(-20),
+    updatedAt: Date.now(),
+  })
+}
+
 /** 处理某会话所有 pending 提取任务；串行执行，失败则停（下次再试） */
 async function runPendingTasks(sessionId, settings, onUpdate) {
   const tasks = (await db.tasks.where('sessionId').equals(sessionId).toArray())
@@ -128,6 +238,7 @@ async function runPendingTasks(sessionId, settings, onUpdate) {
   if (!tasks.length) return
 
   const api = makeApi(settings)
+  const sys = extractorSys(settings)
   const msgs = await getMessages(sessionId)
 
   for (const t of tasks) {
@@ -139,15 +250,12 @@ async function runPendingTasks(sessionId, settings, onUpdate) {
       const aMsg = msgs.find((m) => m.id === t.assistantMsgId)
       if (!userMsg || !aMsg) { await db.tasks.update(t.id, { status: 'done' }); continue }
 
-      const content = `## 最近一轮对话\n用户：${userMsg.content}\n角色：${aMsg.content}\n\n## 当前状态\n${JSON.stringify(session.state || emptyState())}`
-      const raw = await api.complete(
-        [{ role: 'system', content: EXTRACTOR_SYS }, { role: 'user', content }],
-        { json: true, temperature: 0 }
-      )
-      const diff = parseJsonLoose(raw)
+      const diff = await extractRound(api, sys, session.state, userMsg, aMsg, sessionId)
       // applyDiff 幂等：即使本任务曾被部分应用（写状态成功、标 done 失败）后重跑，也不会重复写入
       const next = applyDiff(session.state, diff, aMsg.turn || 0)
-      await db.sessions.update(sessionId, { state: next, updatedAt: Date.now() })
+      // 审计（批次7）：应用前快照 + diff 落 stateLog（session 普通字段，无需升库版本），供撤销 / 回溯
+      const stateLog = [...(session.stateLog || []), { turn: aMsg.turn || 0, ts: Date.now(), diff, snapshot: session.state }].slice(-20)
+      await db.sessions.update(sessionId, { state: next, stateLog, updatedAt: Date.now() })
       await db.tasks.update(t.id, { status: 'done' })
       onUpdate && onUpdate()
     } catch (e) {

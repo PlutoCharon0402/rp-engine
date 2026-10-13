@@ -25,14 +25,28 @@ db.version(1).stores({                       // ← 冻结，勿改
   tasks: '++id, sessionId, status',
 })
 
-// v2：只加索引，不改数据形状（未挂 upgrade → 数据零改动，向后兼容）
-db.version(2).stores({
+// v3：新增 backups 表（导入 / 恢复前的自动快照，给"清库覆盖"一次后悔药）。
+// 同样只加表、不改既有数据形状（未挂 upgrade → 数据零改动，向后兼容）。
+// ⚠️ backups **不参与导入清空**：importDump 的 CLEAR_TABLES 刻意不含它，快照才活得过导入。
+db.version(3).stores({
   characters: '++id, name',
   sessions: '++id, updatedAt, characterId',      // P0-3：按角色卡查引用该卡的会话
   messages: '++id, sessionId, [sessionId+id]',   // 按会话取历史时可用复合索引排序
   lore: '++id',
   tasks: '++id, sessionId, status, [sessionId+status]',
-  // backups: '++id, createdAt',                 // 仅当 P0-1 采用"导入前自动备份"方案时启用
+  backups: '++id, createdAt',                    // 批次3：全量快照（自动 / 手动）
+})
+
+// v4：新增 metrics 表（多模型性能监控：每次模型调用一条记录，按厂商聚合对比）。
+// 同样只加表；⚠️ metrics **不参与导入清空**——历史表现数据不应被导入备份抹掉。
+db.version(4).stores({
+  characters: '++id, name',
+  sessions: '++id, updatedAt, characterId',
+  messages: '++id, sessionId, [sessionId+id]',
+  lore: '++id',
+  tasks: '++id, sessionId, status, [sessionId+status]',
+  backups: '++id, createdAt',
+  metrics: '++id, ts, provider, purpose',        // 多模型：调用记录（保留最近 500 条）
 })
 
 // 多标签页 / 多窗口：别的连接未关闭时升级会被阻塞，给出明确指引而不是静默失败

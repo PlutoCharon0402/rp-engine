@@ -49,6 +49,52 @@ export function removeLore(list, uid) {
 }
 
 /**
+ * 世界书导入包校验（批次4）。合法 → 返回规范化后的条目数组（带 uid）；非法 → **抛 Error**。
+ *
+ * 三种必须拦下的文件：
+ * ① 全量备份（有 characters / sessions / messages 顶层键）—— 导入它会清库；
+ * ② 单故事导出（app=rp-engine & type=session）—— 该走「对话」页的导入记录；
+ * ③ 任意无关 JSON（没有 entries 或条目无 content）。
+ */
+export function validateLorePack(dump) {
+  if (!dump || typeof dump !== 'object' || Array.isArray(dump)) {
+    throw new Error('文件顶层必须是 JSON 对象')
+  }
+  if (dump.app === 'rp-engine' && dump.type === 'session') {
+    throw new Error('这是单个故事的导出文件（.session.json），请在「对话」页用「导入记录」导入')
+  }
+  if (dump.characters || dump.sessions || dump.messages) {
+    throw new Error('这是全量备份文件，请在「设置」页用「导入备份」导入（会覆盖整个数据库）')
+  }
+  if (dump.app === 'rp-engine' && dump.type !== 'lore') {
+    throw new Error('不是 RP Engine 的世界书导出文件')
+  }
+  if (!Array.isArray(dump.entries)) throw new Error('缺少 entries 数组')
+  if (!dump.entries.length) throw new Error('文件中没有条目')
+
+  const entries = dump.entries.filter((e) => e && typeof e === 'object' && typeof e.content === 'string' && e.content.trim())
+  if (!entries.length) throw new Error('没有可导入的条目（每条至少要有一个非空的 content）')
+  return normalizeLore(entries)
+}
+
+/** 构建世界书导出包 */
+export function buildLorePack(entries) {
+  return {
+    app: 'rp-engine',
+    type: 'lore',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    entries: normalizeLore(entries).map((e) => ({
+      keys: e.keys || '',
+      content: e.content || '',
+      priority: Number(e.priority) || 0,
+      constant: !!e.constant,
+      enabled: e.enabled !== false,
+    })),
+  }
+}
+
+/**
  * 启停一条。同样带 uid 守卫：uid 缺失时不变更任何条目（避免"全部翻转"）。
  */
 export function toggleLore(list, uid) {

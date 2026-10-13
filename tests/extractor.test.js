@@ -39,3 +39,37 @@ describe('T4 · applyDiff 幂等（P0-4，批次 2 已修复）', () => {
     expect(b.events).toEqual([{ turn: 7, text: '角色发现了密道' }])
   })
 })
+
+// 批次4 · relations：字段此前一直是"定义了但没人用"的僵尸，现在启用
+describe('R · relations（人物关系）', () => {
+  it('R1 新增关系，记录 turn', () => {
+    const s = applyDiff(empty(), { relations_add: [{ from: '林越', to: '沈昭', desc: '表面师徒' }] }, 4)
+    expect(s.relations).toEqual([{ from: '林越', to: '沈昭', desc: '表面师徒', turn: 4 }])
+  })
+
+  it('R2 同一对人物再次给出 → 覆盖 desc（关系演变，而不是堆积）', () => {
+    const a = applyDiff(empty(), { relations_add: [{ from: '林越', to: '沈昭', desc: '师徒' }] }, 4)
+    const b = applyDiff(a, { relations_add: [{ from: '林越', to: '沈昭', desc: '决裂' }] }, 9)
+    expect(b.relations).toEqual([{ from: '林越', to: '沈昭', desc: '决裂', turn: 9 }])
+  })
+
+  it('R3 幂等：同一 diff 重放不新增、不改内容', () => {
+    const diff = { relations_add: [{ from: 'A', to: 'B', desc: '同伴' }] }
+    const a = applyDiff(empty(), diff, 3)
+    const b = applyDiff(a, diff, 3)
+    expect(b.relations).toEqual(a.relations)
+    expect(b.relations.length).toBe(1)
+  })
+
+  it('R4 脏数据守卫：缺 from / to 的条目跳过，非对象跳过', () => {
+    const s = applyDiff(empty(), {
+      relations_add: [{ to: 'B', desc: '缺 from' }, { from: 'A', desc: '缺 to' }, null, '字符串'],
+    }, 2)
+    expect(s.relations).toEqual([])
+  })
+
+  it('R5 desc 缺省时仍记录关系（空描述，交给状态页补）', () => {
+    const s = applyDiff(empty(), { relations_add: [{ from: 'A', to: 'B' }] }, 2)
+    expect(s.relations).toEqual([{ from: 'A', to: 'B', desc: '', turn: 2 }])
+  })
+})

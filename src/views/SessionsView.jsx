@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { db } from '../lib/db'
-import { fmtTime } from '../lib/util'
+import { fmtTime, fmtTokens, totalTokens, emptyUsage } from '../lib/util'
 import { substMacros } from '../lib/compiler'
 import { normalizeLore } from '../lib/lore'
 import { snapshotOf, isCardMissing } from '../lib/cardRef'
@@ -41,6 +41,8 @@ export default function SessionsView({ onSelect, onGoChars }) {
       state,
       // 会话级隔离：拷贝角色专属世界书，并补齐 uid（否则删 1 条会清空全部，P0-2）
       lore: normalizeLore(card.embeddedLore || []),
+      params: {},        // 批次4：本故事参数覆盖，空 = 全部跟随全局
+      usage: emptyUsage(), // 批次4：token 累计（新增普通字段，无需升版本）
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })
@@ -183,7 +185,11 @@ export default function SessionsView({ onSelect, onGoChars }) {
           <div key={s.id} className="list-row">
             <button className="list-main" onClick={() => onSelect(s.id)}>
               <b>{s.name}</b>
-              <span className="muted">{fmtTime(s.updatedAt)} · {Object.keys(s.state?.characters || {}).length} 个角色在册{s.lore?.length ? ` · 专属世界书 ${s.lore.length} 条` : ''}</span>
+              <span className="muted">
+                {fmtTime(s.updatedAt)} · {Object.keys(s.state?.characters || {}).length} 个角色在册
+                {s.lore?.length ? ` · 专属世界书 ${s.lore.length} 条` : ''}
+                {s.usage?.calls ? ` · 已用 ${fmtTokens(totalTokens(s.usage))} tokens` : ''}
+              </span>
               {isCardMissing(s, cards.find((c) => c.id === s.characterId)) && (
                 <span className="badge err">角色卡缺失</span>
               )}

@@ -87,3 +87,76 @@ export async function importDump(dump) {
   })
   return Object.fromEntries(tables.map((t) => [t, dump[t].length]))
 }
+
+/* ────────────────────────────────────────────────────────────
+ * 批次3 · 全量快照（backups 表）
+ *
+ * 背景：全量导入是"清库后覆盖"。虽然有单事务回滚，但一旦导入成功、用户才想起导错了，
+ * 就没有任何回滚手段（旧数据已被覆盖）。快照 = 一次后悔药。
+ *
+ * ⚠️ backups 表**不在** CLEAR_TABLES 里 —— 导入清空时它必须活下来，快照才有意义。
+ * ──────────────────────────────────────────────────────────── */
+
+/** 参与快照 / 导出的表（含 tasks：与导入清空范围对齐） */
+export const SNAPSHOT_TABLES = [...DUMP_TABLES]
+
+/** 读全库 → 可序列化的 dump 对象 */
+export async function buildDump() {
+  const dump = {}
+  for (const t of SNAPSHOT_TABLES) dump[t] = await db.table(t).toArray()
+  return dump
+}
+
+export function countDump(dump) {
+  return SNAPSHOT_TABLES.reduce((n, t) => n + (dump[t]?.length || 0), 0)
+}
+
+/** 浏览器下载。**只在 UI 调用**：node 测试环境没有 document / Blob URL */
+export function downloadDump(dump, name) {
+  const blob = new Blob([JSON.stringify(dump)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = name || `rp-engine-backup-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+/**
+ * 拍一张全量快照。返回 { id, counts }。
+ * protectId：prune 时强制保留的快照（恢复场景用它保住"刚用过的那张"）。
+ */
+export async function snapshotBackup(reason = '手动快照', protectId = null) {
+  const dump = await buildDump()
+  const counts = Object.fromEntries(SNAPSHOT_TABLES.map((t) => [t, dump[t].length]))
+  const id = await db.backups.add({ createdAt: Date.now(), reason, counts, dump })
+  await pruneBackups(3, protectId ?? id)
+  return { id, counts }
+}
+
+/** 只保留最近 keep 条（protectId 豁免）。返回删除条数 */
+export async function pruneBackups(keep = 3, protectId = null) {
+  const all = await db.backups.orderBy('createdAt').reverse().toArray()
+  const keepers = new Set(all.slice(0, Math.max(1, keep)).map((b) => b.id))
+  if (protectId != null) keepers.add(protectId)
+  const drop = all.filter((b) => !keepers.has(b.id)).map((b) => b.id)
+  if (drop.length) await db.backups.bulkDelete(drop)
+  return drop.length
+}
+
+/** 快照清单（不含 dump 本体，避免把整库读进内存） */
+export async function listBackups() {
+  const all = await db.backups.orderBy('createdAt').reverse().toArray()
+  return all.map((b) => ({ id: b.id, createdAt: b.createdAt, reason: b.reason, counts: b.counts }))
+}
+
+/**
+ * 恢复某张快照：先给**当前**数据再拍一张（对称，恢复也能反悔），再覆盖写入。
+ * 返回 { counts, undoId }：counts 是实际写入条数，undoId 是"回到恢复前"的快照 id。
+ */
+export async function restoreBackup(id) {
+  const snap = await db.backups.get(id)
+  if (!snap) throw new Error('该快照已不存在（可能已被自动清理）')
+  const { id: undoId } = await snapshotBackup('恢复前自动快照', id)
+  const counts = await importDump(snap.dump)
+  return { counts, undoId }
+}
