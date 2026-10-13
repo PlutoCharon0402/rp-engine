@@ -2,12 +2,17 @@
 // 导出：JSON（无损，含状态/专属世界书/角色卡快照，可再导入）或 TXT（纯对话文本）
 // 导入：RP Engine 会话 JSON → 重建会话；角色卡按名字复用，缺失则从快照重建
 import { db, getMessages } from './db'
+import { normalizeLore } from './lore'
+import { snapshotOf } from './cardRef'
+import { emptyUsage } from './util'
 
 /** 构建无损导出对象 */
 export async function buildSessionExport(sessionId) {
   const session = await db.sessions.get(sessionId)
   if (!session) throw new Error('会话不存在')
-  const card = await db.characters.get(session.characterId)
+  // 故事实际使用的是快照（解耦语义）；原卡仍在时用它补齐快照没有的字段（开场白、备选开场、内嵌世界书）
+  const live = session.characterId ? await db.characters.get(session.characterId) : null
+  const card = session.cardSnapshot ? { ...(live || {}), ...session.cardSnapshot } : live
   const messages = await getMessages(sessionId)
   return {
     app: 'rp-engine',
@@ -17,7 +22,8 @@ export async function buildSessionExport(sessionId) {
     session: {
       name: session.name,
       state: session.state,
-      lore: session.lore || [],
+      lore: normalizeLore(session.lore || []), // 导出即规范化，保证再导入后删 1 条只掉 1 条
+      summary: session.summary || '',          // 批次4：早期剧情摘要（导入后进度归零，摘要本身保留）
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
     },
@@ -78,8 +84,13 @@ export async function importSessionFile(file) {
   const sid = await db.sessions.add({
     name: exp.session?.name || `${card.name}的导入故事`,
     characterId: card.id,
+    cardSnapshot: snapshotOf(card),
     state: exp.session?.state || { characters: {}, facts: [], events: [], relations: [] },
-    lore: Array.isArray(exp.session?.lore) ? exp.session.lore : [],
+    lore: normalizeLore(exp.session?.lore), // 老导出文件可能无 uid，导入时补齐
+    params: {},           // 导入的故事默认全部跟随全局参数
+    usage: emptyUsage(),  // 导入的故事从零开始统计
+    summary: exp.session?.summary || '',
+    summaryUpTo: 0,       // 消息 id 是新建的，旧摘要进度无意义
     createdAt: exp.session?.createdAt || now,
     updatedAt: now,
   })

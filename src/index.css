@@ -99,8 +99,22 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .banner.warn { background: rgba(212, 169, 106, 0.15); color: var(--gold); cursor: pointer; }
 .banner.error { background: rgba(224, 108, 108, 0.15); color: var(--danger); cursor: pointer; }
 .banner.info { background: var(--panel2); color: var(--muted); }
+.banner.flex { display: flex; align-items: center; gap: 8px; }
+.danger-text { border-color: rgba(224, 108, 108, 0.5); color: var(--danger); }
 .ok-text { color: #7ec98f; }
 .err-text { color: var(--danger); }
+
+/* 状态徽标（新增）：会话头部的"快照 / 角色卡缺失"，会话列表的"角色卡缺失" */
+.badge {
+  flex-shrink: 0; align-self: flex-start; margin-top: 2px;
+  padding: 1px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--line); background: var(--panel2); color: var(--muted);
+}
+.badge.err { border-color: rgba(224, 108, 108, 0.4); background: rgba(224, 108, 108, 0.15); color: var(--danger); }
+
+/* 模型表现表（设置页）：横向可滚动，隔行淡背景 */
+.table th, .table td { padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table tbody tr:nth-child(even) { background: var(--panel2); }
 
 .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { background: none; border: none; color: var(--muted); padding: 5px 12px; font-size: 13px; cursor: pointer; }
@@ -143,6 +157,8 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .bubble.assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
 .bubble.user { align-self: flex-end; background: var(--user-bubble); border-bottom-right-radius: 4px; }
 .bubble-name { font-size: 12px; color: var(--gold); margin-bottom: 4px; }
+.bubble.tappable { cursor: pointer; }
+.bubble-flag { margin-top: 6px; font-size: 11px; color: var(--muted); }
 .cursor { animation: blink 1s step-end infinite; color: var(--gold); }
 @keyframes blink { 50% { opacity: 0; } }
 

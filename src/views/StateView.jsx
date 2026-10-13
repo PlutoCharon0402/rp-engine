@@ -1,14 +1,36 @@
 import { useEffect, useState } from 'react'
 import { db, emptyState } from '../lib/db'
+import { undoExtract, reExtractFrom } from '../lib/extractor'
+import { fmtTime } from '../lib/util'
+import { hasAnyProviderReady } from '../lib/providers/registry'
+
+/** 提取记录的变更摘要：'+ 角色 1、事实 2'；无变化显示占位 */
+function diffSummary(diff) {
+  if (!diff) return '（无记录）'
+  const parts = []
+  const c = Object.keys(diff.characters || {}).length
+  if (c) parts.push(`角色 ${c}`)
+  const f = (diff.facts_add || []).length
+  if (f) parts.push(`事实 ${f}`)
+  const e = (diff.events_add || []).length
+  if (e) parts.push(`事件 ${e}`)
+  const r = (diff.relations_add || []).length
+  if (r) parts.push(`关系 ${r}`)
+  return parts.length ? `+ ${parts.join('、')}` : '（无变化）'
+}
 
 // 世界状态面板：查看/直接编辑角色状态与事实 —— retcon 的入口
-export default function StateView({ sessionId, version }) {
+export default function StateView({ sessionId, version, settings }) {
   const [session, setSession] = useState(null)
   const [mode, setMode] = useState('pretty')
   const [raw, setRaw] = useState('')
   const [err, setErr] = useState('')
   const [newFact, setNewFact] = useState('')
   const [newEvent, setNewEvent] = useState('')
+  const [relA, setRelA] = useState('')   // 批次4：人物关系 A → B
+  const [relB, setRelB] = useState('')
+  const [relDesc, setRelDesc] = useState('')
+  const [replay, setReplay] = useState(null) // 批次7：回溯重放进度 {done,total}；null=未进行
 
   useEffect(() => {
     (async () => {
@@ -27,6 +49,7 @@ export default function StateView({ sessionId, version }) {
   }
 
   const state = session.state || emptyState()
+  const log = session.stateLog || []
 
   async function save(next) {
     await db.sessions.update(sessionId, { state: next, updatedAt: Date.now() })
@@ -47,6 +70,41 @@ export default function StateView({ sessionId, version }) {
       setMode('pretty')
     } catch (e) {
       setErr(`JSON 解析失败：${e.message}`)
+    }
+  }
+
+  /* ── 批次7：提取审计（撤销 / 回溯重放）── */
+
+  async function refresh() {
+    setSession(await db.sessions.get(sessionId))
+  }
+
+  async function onUndo(turn) {
+    if (replay) return
+    if (!confirm(`撤销第 ${turn} 回合的提取？\n\n世界状态会回到该次提取之前，之后的提取记录一并丢弃。`)) return
+    try {
+      await undoExtract(sessionId, turn)
+      await refresh()
+    } catch (e) {
+      setErr(e.message)
+    }
+  }
+
+  async function onReplay(turn) {
+    if (replay) return
+    if (!hasAnyProviderReady(settings)) { setErr('尚未配置任何模型，无法重放提取'); return }
+    if (!confirm(`从第 ${turn} 回合起重放提取？\n\n会以该回合提取前的状态为起点，用当前的模型与提示词重跑之后的每一轮对话（每轮消耗一次提取调用）。`)) return
+    setReplay({ done: 0, total: 0 })
+    try {
+      const n = await reExtractFrom(sessionId, turn, settings, (done, total) => setReplay({ done, total }))
+      setErr('')
+      await refresh()
+      setMode('pretty')
+      alert(`重放完成：共重跑 ${n} 轮提取。`)
+    } catch (e) {
+      setErr(`回溯提取失败：${e.message}`)
+    } finally {
+      setReplay(null)
     }
   }
 
@@ -113,6 +171,58 @@ export default function StateView({ sessionId, version }) {
             <input className="input grow" placeholder="添加事实…" value={newFact} onChange={(e) => setNewFact(e.target.value)} />
             <button className="btn" onClick={() => { if (newFact.trim()) { save({ ...state, facts: [...(state.facts || []), { turn: 0, text: newFact.trim() }] }); setNewFact('') } }}>添加</button>
           </div>
+
+          <h3>人物关系（{state.relations?.length || 0}）</h3>
+          <div className="list">
+            {(state.relations || []).map((r, i) => (
+              <div key={i} className="list-row">
+                <span className="list-main">
+                  {r.from} → {r.to}
+                  <span className="muted">{r.desc || '（未描述）'}</span>
+                </span>
+                <button className="icon-btn danger" onClick={() => save({ ...state, relations: state.relations.filter((_, j) => j !== i) })}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div className="field-grid">
+            <label>A<input className="input" value={relA} onChange={(e) => setRelA(e.target.value)} placeholder="角色名" /></label>
+            <label>B<input className="input" value={relB} onChange={(e) => setRelB(e.target.value)} placeholder="角色名" /></label>
+            <label className="span2">关系描述
+              <input className="input" value={relDesc} onChange={(e) => setRelDesc(e.target.value)} placeholder="例：表面师徒，实则互相提防" />
+            </label>
+          </div>
+          <div className="row">
+            <button className="btn" onClick={() => {
+              const from = relA.trim(), to = relB.trim(), desc = relDesc.trim()
+              if (!from || !to) { setErr('两个角色名都要填'); return }
+              // 同一对人物只保留一条：后来的描述覆盖旧的（与提取器的覆盖语义一致）
+              const rest = (state.relations || []).filter((r) => !(r.from === from && r.to === to))
+              save({ ...state, relations: [...rest, { from, to, desc, turn: 0 }] })
+              setRelA(''); setRelB(''); setRelDesc(''); setErr('')
+            }}>添加关系</button>
+          </div>
+
+          {/* 批次7：提取审计——每回合提取前都有快照，可撤销或换提示词/模型后重放 */}
+          <h3>提取记录（{log.length}）</h3>
+          {replay && (
+            <div className="banner info">回溯重放中… {replay.done}/{replay.total || '?'} 轮</div>
+          )}
+          {log.length > 0 ? (
+            <div className="list">
+              {[...log].reverse().map((e) => (
+                <div key={e.turn} className="list-row">
+                  <span className="list-main">
+                    <span className="muted">T{e.turn}</span> {diffSummary(e.diff)}
+                    <span className="muted">{fmtTime(e.ts)}</span>
+                  </span>
+                  <button className="btn small" disabled={!!replay} onClick={() => onUndo(e.turn)}>撤销</button>
+                  <button className="btn small" disabled={!!replay} onClick={() => onReplay(e.turn)}>从此重放</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted small">暂无提取记录（保留最近 20 次）。对话几轮后会出现在这里，可撤销某次提取，或修改提示词 / 更换模型后从任意记录点重放。</p>
+          )}
 
           <h3>事件线（{state.events?.length || 0}）</h3>
           <div className="list">
