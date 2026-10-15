@@ -5,10 +5,11 @@ import { db } from './db'
 
 /** 四类核心数据，至少要有一类存在才算合法备份 */
 export const CORE_TABLES = ['characters', 'sessions', 'messages', 'lore']
-/** 可被导入的表（tasks 可选：老备份没有它） */
-export const DUMP_TABLES = [...CORE_TABLES, 'tasks']
-/** 导入时会被清空的表（含 tasks：exportData 已含它，避免导入后任务凭空消失） */
-export const CLEAR_TABLES = [...CORE_TABLES, 'tasks']
+/** 可被导入的表（tasks / rules 可选：老备份没有它们） */
+export const DUMP_TABLES = [...CORE_TABLES, 'tasks', 'rules']
+/** 导入时会被清空的表（含 tasks：exportData 已含它，避免导入后任务凭空消失；
+ *  含 rules：批次8 事件规则与 lore 同为用户数据，随全量备份走） */
+export const CLEAR_TABLES = [...CORE_TABLES, 'tasks', 'rules']
 
 /** 每张表的核心必填字段：只校验最关键的几个，避免过严拒绝老备份 */
 const REQUIRED = {
@@ -17,6 +18,7 @@ const REQUIRED = {
   messages: ['sessionId', 'role', 'content'],
   lore: ['content'],
   tasks: ['sessionId'],
+  rules: ['name'],
 }
 
 const TABLE_LABEL = {
@@ -25,6 +27,7 @@ const TABLE_LABEL = {
   messages: '消息',
   lore: '世界书',
   tasks: '提取任务',
+  rules: '事件规则',
 }
 
 /**

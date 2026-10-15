@@ -108,8 +108,9 @@ export function trimHistory(history, maxHistory, budgetTokens) {
  * depth=1 时：动态块紧贴最新用户消息之前——prompt 仍以用户行动收尾（扮演效果好），
  * 且静态前缀+历史构成逐字节稳定的前缀（历史只增不改），缓存命中率随对话增长趋近上限。
  * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息。
+ * @param hints 事件钩子的一次性剧情提示（批次8）：注入后由调用方消费清空
  */
-export function compileMessages(card, lore, state, history, settings, summary) {
+export function compileMessages(card, lore, state, history, settings, summary, hints) {
   const constant = (lore || []).filter((e) => e.enabled !== false && e.constant).map((e) => substMacros(e.content, card))
   const messages = [{ role: 'system', content: [cardText(card), ...constant].filter(Boolean).join('\n\n') }]
 
@@ -131,6 +132,8 @@ export function compileMessages(card, lore, state, history, settings, summary) {
   const dyn = [
     summary && `## 更早的剧情摘要（已发生的情节，不得与之矛盾）\n${summary}`,
     stateSummary(state),
+    // 批次8：事件钩子的一次性提示（规则触发后只在下一回合注入一次，随后被消费清空）
+    hints?.length && `## 剧情事件（刚发生的事件触发了以下提示，只提示这一次）\n${hints.map((h) => h.text).join('\n')}`,
     triggered.length && `## 世界书补充设定\n${triggered.map((t) => substMacros(t, card)).join('\n\n')}`,
   ].filter(Boolean).join('\n\n')
 

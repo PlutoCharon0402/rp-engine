@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { db, getMessages } from '../lib/db'
+import { db, getTimeline, setTimelineHead } from '../lib/db'
 import { compileMessages } from '../lib/compiler'
 import { processPendingTasks, enqueueTask } from '../lib/extractor'
 import { makeApi } from '../lib/api'
@@ -53,7 +53,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       const { card: resolved, source } = await resolveCard(s)
       setCard(resolved)
       setCardSource(source)
-      setMessages(await getMessages(sessionId))
+      setMessages(await getTimeline(sessionId))
       setError('')
       // 补跑上次未完成的状态提取
       const pending = (await db.tasks.where('sessionId').equals(sessionId).toArray()).filter((t) => t.status === 'pending')
@@ -154,7 +154,8 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     try {
       const lore = [...(await db.lore.toArray()), ...(session?.lore || [])] // 全局 + 本故事专属
       const api = makeApi(eff)
-      const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary)
+      // 批次8：pendingHints 是事件钩子排队的一次性剧情提示，注入本回合后即被消费清空
+      const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary, session?.pendingHints)
       // 续写：以指令消息收尾让模型顺着最后一段继续；指令不落库，不污染历史
       if (opts.instruction) compiled.push({ role: 'user', content: opts.instruction })
       for await (const delta of api.stream(compiled, {
@@ -166,10 +167,17 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       }
       setStreaming(null)
       const lastUser = [...history].reverse().find((m) => m.role === 'user')
-      const aMsg = { sessionId, role: 'assistant', content: acc, turn: history.length + 1, ts: Date.now() }
+      // 批次9：新消息接在当前时间线末尾之后（parent 链），落库后活动指针前移
+      const parentId = history.length ? history[history.length - 1].id : null
+      const aMsg = { sessionId, role: 'assistant', content: acc, turn: history.length + 1, ts: Date.now(), parentId }
       aMsg.id = await db.messages.add(aMsg)
       setMessages([...history, aMsg])
-      await db.sessions.update(sessionId, { updatedAt: Date.now() })
+      await db.sessions.update(sessionId, {
+        updatedAt: Date.now(),
+        activeMsgId: aMsg.id,
+        // 消费已注入的一次性提示（生成成功才清——失败/中断保留，下回合重试）
+        ...(session?.pendingHints?.length ? { pendingHints: [] } : {}),
+      })
       kickExtraction(lastUser, aMsg) // 后台提取状态，不阻塞 UI
       maybeSummarize([...history, aMsg]) // 窗口外的旧对话折叠成摘要，失败静默
     } catch (e) {
@@ -179,9 +187,11 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
         // 残缺文本不该被提取器当成既定剧情写进世界状态。
         try {
           if (acc.trim()) {
-            const m = { sessionId, role: 'assistant', content: acc, turn: history.length + 1, ts: Date.now(), partial: true }
+            const parentId = history.length ? history[history.length - 1].id : null
+            const m = { sessionId, role: 'assistant', content: acc, turn: history.length + 1, ts: Date.now(), partial: true, parentId }
             m.id = await db.messages.add(m)
             setMessages([...history, m])
+            await db.sessions.update(sessionId, { updatedAt: Date.now(), activeMsgId: m.id })
             setNotice('已停止生成，保留了中断前的部分内容（本回合未做状态提取）。')
           } else {
             setNotice('已停止生成。上一条消息还没收到回复，可点「重生成」重试。')
@@ -203,10 +213,12 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     if (!canGenerate()) return // 先确认能生成，再落库（否则就是一条注定没有回复的孤儿消息）
     setInput('')
     setError('')
-    const userMsg = { sessionId, role: 'user', content, turn: messages.length + 1, ts: Date.now() }
+    const parentId = messages.length ? messages[messages.length - 1].id : null
+    const userMsg = { sessionId, role: 'user', content, turn: messages.length + 1, ts: Date.now(), parentId }
     userMsg.id = await db.messages.add(userMsg)
     const next = [...messages, userMsg]
     setMessages(next)
+    await setTimelineHead(sessionId, userMsg.id) // 批次9：活动指针随新消息前移
     await streamReply(next)
   }
 
@@ -245,8 +257,9 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
         if (t.status !== 'done' && removed.includes(t.assistantMsgId)) await db.tasks.delete(t.id)
       }
     }
-    if (!h.length) { setMessages([]); return }
+    if (!h.length) { setMessages([]); await setTimelineHead(sessionId, null); return }
     setMessages(h)
+    await setTimelineHead(sessionId, h[h.length - 1].id) // 删除末尾后活动指针回退
     await streamReply(h)
   }
 
@@ -286,8 +299,65 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
         if (t.status !== 'done' && t.assistantMsgId === menu.id) await db.tasks.delete(t.id)
       }
     }
+    // 批次9：删的是**当前时间线**上的消息 → 缝合 parent 链，活动指针按需回退。
+    // 删的是暗线（其他分支）上的消息则不碰活动线。
+    const idx = messages.findIndex((m) => m.id === menu.id)
+    if (idx >= 0) {
+      const prev = messages[idx - 1]
+      const next = messages[idx + 1]
+      if (next) await db.messages.update(next.id, { parentId: prev?.id ?? null })
+      else await setTimelineHead(sessionId, prev?.id ?? null)
+    }
     setMessages((prev) => prev.filter((m) => m.id !== menu.id))
     closeMenu()
+  }
+
+  /* ────────── 批次9：时间线分支 ────────── */
+
+  /** 从菜单消息处开新分支：活动指针移过去，其后的旧消息进入暗线（仍可再切回） */
+  async function branchFrom() {
+    if (!menu) return
+    const isHead = messages.length && messages[messages.length - 1].id === menu.id
+    await setTimelineHead(sessionId, menu.id)
+    setMessages(await getTimeline(sessionId))
+    closeMenu()
+    setNotice(isHead
+      ? '已定位到这条消息（它就是当前时间线末尾）。'
+      : '已从此处分支。之后的旧消息进入暗线（仍在库中，随时可再从那条消息切回）。')
+  }
+
+  /** 在当前时间线末尾创建存档（消息位置 + 世界状态快照，可随时恢复） */
+  async function saveSnapshot() {
+    const name = prompt('存档名称：', `存档 ${new Date().toLocaleString()}`)
+    if (!name?.trim()) return
+    const snap = {
+      id: `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      msgId: messages.length ? messages[messages.length - 1].id : null,
+      name: name.trim(),
+      state: session?.state || { characters: {}, facts: [], events: [], relations: [] },
+      ts: Date.now(),
+    }
+    await db.sessions.update(sessionId, { snapshots: [...(session?.snapshots || []), snap].slice(-20) })
+    refreshSession()
+    setNotice('已存档。可在「⚙ → 时间线与存档」中恢复。')
+  }
+
+  /** 恢复存档：回到存档时的消息位置与世界状态（提示与触发日志保留） */
+  async function restoreSnapshot(snap) {
+    if (!confirm(`恢复存档「${snap.name}」？\n\n时间线回到存档位置，世界状态恢复为存档时的快照（提取审计记录仍保留，可再回溯）。`)) return
+    await db.sessions.update(sessionId, {
+      activeMsgId: snap.msgId,
+      state: snap.state,
+      updatedAt: Date.now(),
+    })
+    setMessages(await getTimeline(sessionId))
+    refreshSession()
+    setNotice(`已恢复存档「${snap.name}」。`)
+  }
+
+  async function removeSnapshot(snapId) {
+    await db.sessions.update(sessionId, { snapshots: (session?.snapshots || []).filter((s) => s.id !== snapId) })
+    refreshSession()
   }
 
   async function copyMsg() {
@@ -427,6 +497,8 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
                   <button className="btn" onClick={() => setEditText(menu.content || '')}>编辑</button>
                   <button className="btn" onClick={copyMsg}>复制</button>
                   <button className="btn danger-text" onClick={deleteMsg}>删除</button>
+                  {/* 批次9：在这条消息处开分支（之后的旧消息进入暗线） */}
+                  <button className="btn" disabled={busy} onClick={branchFrom}>从此分支</button>
                 </div>
                 <div className="row-end">
                   <button className="btn" onClick={closeMenu}>关闭</button>
@@ -493,6 +565,36 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
                 <input className="input" type="number" min="0" value={numOrEmpty(session?.params?.loreBudget)} placeholder={String(settings.loreBudget)}
                   onChange={(e) => setParam('loreBudget', numInput(e.target.value))} />
               </label>
+            </div>
+
+            {/* 批次9：时间线与存档 */}
+            <div className="card" style={{ marginTop: 12 }}>
+              <div className="card-title">
+                <b>时间线与存档</b>
+                <button className="btn small" disabled={busy || !messages.length} onClick={saveSnapshot}>在此存档</button>
+              </div>
+              <p className="muted small">
+                当前时间线 {messages.length} 条消息。存档 = 消息位置 + 世界状态快照；恢复后从该点继续，写成另一个走向。
+                消息菜单里的「从此分支」只切时间线（不动状态），存档恢复则两者一起回退。
+              </p>
+              {session?.pendingHints?.length > 0 && (
+                <p className="small">⏳ 有 {session.pendingHints.length} 条事件提示待注入（下一回合生成时生效一次）。</p>
+              )}
+              <div className="list">
+                {[...(session?.snapshots || [])].reverse().map((snap) => (
+                  <div key={snap.id} className="list-row">
+                    <span className="list-main">
+                      {snap.name}
+                      <span className="muted">
+                        {messages.length && messages[messages.length - 1].id === snap.msgId ? '当前位置' : `T·回到 ${new Date(snap.ts).toLocaleDateString()}`}
+                      </span>
+                    </span>
+                    <button className="btn small" disabled={busy} onClick={() => restoreSnapshot(snap)}>恢复</button>
+                    <button className="icon-btn danger" onClick={() => removeSnapshot(snap.id)}>✕</button>
+                  </div>
+                ))}
+              </div>
+              {!session?.snapshots?.length && <p className="muted small">暂无存档。</p>}
             </div>
 
             {session?.summary && (

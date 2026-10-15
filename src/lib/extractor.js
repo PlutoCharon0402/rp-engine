@@ -9,6 +9,7 @@
 //   4. 失败退避  —— 领取时 attempts 自增，达 MAX_ATTEMPTS 转_failed，不再无限重试污染日志
 import { db, getMessages, emptyState } from './db'
 import { makeApi } from './api'
+import { matchRules, hookPatch } from './hooks'
 
 export const EXTRACTOR_SYS = `你是角色扮演游戏的状态记录器。读取最近一轮对话与当前世界状态，提取其中新发生的变化。
 只输出严格 JSON，不输出任何其他文字、注释或代码块标记。格式：
@@ -240,6 +241,7 @@ async function runPendingTasks(sessionId, settings, onUpdate) {
   const api = makeApi(settings)
   const sys = extractorSys(settings)
   const msgs = await getMessages(sessionId)
+  const rules = await db.rules.toArray().catch(() => []) // 老库无 rules 表时静默跳过钩子
 
   for (const t of tasks) {
     // 乐观锁：抢不到说明已被其他标签页领走（或状态已变），跳过
@@ -255,7 +257,11 @@ async function runPendingTasks(sessionId, settings, onUpdate) {
       const next = applyDiff(session.state, diff, aMsg.turn || 0)
       // 审计（批次7）：应用前快照 + diff 落 stateLog（session 普通字段，无需升库版本），供撤销 / 回溯
       const stateLog = [...(session.stateLog || []), { turn: aMsg.turn || 0, ts: Date.now(), diff, snapshot: session.state }].slice(-20)
-      await db.sessions.update(sessionId, { state: next, stateLog, updatedAt: Date.now() })
+      // 事件钩子（批次8）：diff 命中规则 → 解锁世界书 / 排队一次性提示 / 记触发日志。
+      // patch 与状态更新合并成**单次写库**，避免多标签页下互相覆盖。
+      const fired = matchRules(rules, diff)
+      const hooks = fired.length ? hookPatch(session, fired, aMsg.turn || 0) : {}
+      await db.sessions.update(sessionId, { state: next, stateLog, updatedAt: Date.now(), ...hooks })
       await db.tasks.update(t.id, { status: 'done' })
       onUpdate && onUpdate()
     } catch (e) {

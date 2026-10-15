@@ -27,7 +27,7 @@ async function seed(log, rounds, state = empty) {
 beforeAll(async () => { await db.open() })
 afterAll(async () => { await db.delete(); db.close() })
 beforeEach(async () => {
-  await Promise.all([db.sessions.clear(), db.messages.clear(), db.tasks.clear()])
+  await Promise.all([db.sessions.clear(), db.messages.clear(), db.tasks.clear(), db.rules.clear()])
   completeMock.mockReset()
 })
 
@@ -57,6 +57,44 @@ describe('XQ · processPendingTasks 写审计日志', () => {
     expect(s.stateLog[0].diff.characters.沈砚.location).toBe('书店')
     // 任务标 done，不会反复入队
     expect((await db.tasks.where('sessionId').equals(sid).toArray()).every((t) => t.status === 'done')).toBe(true)
+  })
+
+  it('批次8：diff 命中事件规则 → 解锁本故事世界书 + 排队一次性提示 + 记触发日志', async () => {
+    const { sid, ids } = await seed([], [[2, '我去了西码头', '你到了仓库']])
+    await db.sessions.update(sid, {
+      lore: [
+        { uid: 'map1', keys: '藏宝图', content: '藏宝图设定', enabled: false, constant: false, priority: 10 },
+        { uid: 'other', keys: 'x', content: '无关条目', enabled: false, constant: false, priority: 0 },
+      ],
+    })
+    await db.tasks.add({ sessionId: sid, userMsgId: ids[0].uid, assistantMsgId: ids[0].aid, status: 'pending', attempts: 0 })
+    await db.rules.add({
+      name: '沈砚抵达西码头', enabled: true,
+      when: { character: '沈砚', location: '西码头' },
+      then: { activateLoreUids: ['map1'], injectOnce: '（他想起抽屉里的铜钥匙）' },
+    })
+    completeMock.mockResolvedValue(JSON.stringify({ characters: { 沈砚: { location: '西码头6号仓库' } } }))
+
+    await processPendingTasks(sid, settings, () => {})
+
+    const s = await db.sessions.get(sid)
+    expect(s.lore.find((e) => e.uid === 'map1').enabled).toBe(true)    // 解锁
+    expect(s.lore.find((e) => e.uid === 'other').enabled).toBe(false)  // 未命中不动
+    expect(s.pendingHints).toEqual([{ ruleId: 1, text: '（他想起抽屉里的铜钥匙）' }])
+    expect(s.hookLog).toEqual([{ ruleId: 1, name: '沈砚抵达西码头', turn: 2, ts: expect.any(Number) }])
+  })
+
+  it('批次8：没有规则 / diff 不命中 → 不产生任何钩子数据', async () => {
+    const { sid, ids } = await seed([], [[1, 'u', 'a']])
+    await db.tasks.add({ sessionId: sid, userMsgId: ids[0].uid, assistantMsgId: ids[0].aid, status: 'pending', attempts: 0 })
+    await db.rules.add({ name: '永不触发', enabled: true, when: { location: '不存在的地方' }, then: { injectOnce: 'x' } })
+    completeMock.mockResolvedValue('{}')
+
+    await processPendingTasks(sid, settings, () => {})
+
+    const s = await db.sessions.get(sid)
+    expect(s.pendingHints).toBeUndefined()
+    expect(s.hookLog).toBeUndefined()
   })
 })
 

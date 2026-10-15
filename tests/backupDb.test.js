@@ -1,11 +1,11 @@
 // P0-1 · importDump 的事务性（需要 IndexedDB：用 fake-indexeddb 提供运行环境）
-// 判据：中途失败（重复主键）时，五张表的记录数必须与调用前**完全一致**——不能出现"清了但没写回"。
+// 判据：中途失败（重复主键）时，被清空范围内的表（v5 起含 rules）记录数必须与调用前**完全一致**——不能出现"清了但没写回"。
 import 'fake-indexeddb/auto'
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from 'vitest'
 import { db } from '../src/lib/db.js'
 import { importDump } from '../src/lib/backup.js'
 
-const TABLES = ['characters', 'sessions', 'messages', 'lore', 'tasks']
+const TABLES = ['characters', 'sessions', 'messages', 'lore', 'tasks', 'rules']
 
 const counts = async () => Object.fromEntries(
   await Promise.all(TABLES.map(async (t) => [t, await db.table(t).count()]))

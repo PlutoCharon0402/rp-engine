@@ -1,12 +1,12 @@
 // 批次3 · 全量快照（backups 表）
-// 判据：① 快照记下五表条数；② 只保留最近 3 张（protectId 豁免）；
+// 判据：① 快照记下六表条数（v5 起含 rules）；② 只保留最近 3 张（protectId 豁免）；
 //      ③ 恢复前先给当前数据拍照（恢复也能反悔）；④ 导入不得清掉快照 —— 否则快照毫无意义。
 import 'fake-indexeddb/auto'
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from 'vitest'
 import { db } from '../src/lib/db.js'
 import { importDump, buildDump, snapshotBackup, pruneBackups, listBackups, restoreBackup } from '../src/lib/backup.js'
 
-const TABLES = ['characters', 'sessions', 'messages', 'lore', 'tasks']
+const TABLES = ['characters', 'sessions', 'messages', 'lore', 'tasks', 'rules']
 
 const names = async () => (await db.characters.toArray()).map((c) => c.name)
 
@@ -22,7 +22,7 @@ beforeEach(async () => {
 })
 
 describe('B1 · 快照写入', () => {
-  it('buildDump 覆盖五张表；快照记录条数与 dump 本体', async () => {
+  it('buildDump 覆盖六张表；快照记录条数与 dump 本体', async () => {
     const dump = await buildDump()
     expect(Object.keys(dump).sort()).toEqual([...TABLES].sort())
 

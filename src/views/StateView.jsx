@@ -50,6 +50,7 @@ export default function StateView({ sessionId, version, settings }) {
 
   const state = session.state || emptyState()
   const log = session.stateLog || []
+  const hookLog = session.hookLog || []
 
   async function save(next) {
     await db.sessions.update(sessionId, { state: next, updatedAt: Date.now() })
@@ -222,6 +223,26 @@ export default function StateView({ sessionId, version, settings }) {
             </div>
           ) : (
             <p className="muted small">暂无提取记录（保留最近 20 次）。对话几轮后会出现在这里，可撤销某次提取，或修改提示词 / 更换模型后从任意记录点重放。</p>
+          )}
+
+          {/* 批次8：事件规则触发记录 */}
+          <h3>事件触发（{hookLog.length}）</h3>
+          {hookLog.length > 0 ? (
+            <div className="list">
+              {[...hookLog].reverse().map((h, i) => (
+                <div key={i} className="list-row">
+                  <span className="list-main">
+                    <span className="muted">T{h.turn}</span> {h.name}
+                    <span className="muted">{fmtTime(h.ts)}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted small">暂无规则触发（保留最近 50 次）。在世界书页「事件规则」里配置：剧情变化命中条件时自动解锁条目或注入提示。</p>
+          )}
+          {session?.pendingHints?.length > 0 && (
+            <p className="small">⏳ {session.pendingHints.length} 条事件提示待注入（下一回合生成时生效一次）。</p>
           )}
 
           <h3>事件线（{state.events?.length || 0}）</h3>
