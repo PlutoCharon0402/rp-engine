@@ -60,9 +60,19 @@ rm -rf node_modules && npm ci     # 换机器 / 换平台 / 出现 MODULE_NOT_FO
    在构建时注入（`package.json` 版本 + 构建时刻），**不需要手工改 `public/sw.js`**。
    旧 bundle（只声明到 v1）打开已升到 v2 的库会直接崩，所以二者必须同批发布。
 
-## 部署到手机（PWA 安装）
+## 部署到手机
 
-PWA 安装需要 HTTPS，推荐 Cloudflare Pages（免费）：
+### 方式一：Android APK（推荐，离线可用）
+
+```bash
+npm run apk    # 产物：android/app/build/outputs/apk/release/app-release.apk
+```
+
+Capacitor 封装，数据存设备本地 IndexedDB，API Key 存 localStorage。首次构建前需
+JDK 17+ 与 Android SDK（命令行安装即可，无需 Android Studio）；签名与版本号规则见
+`docs/alpha-release.md`。**更新请覆盖安装（数据保留），不要卸载重装（数据清零）**。
+
+### 方式二：PWA 安装（需 HTTPS）
 
 1. `npm run build`
 2. 打开 https://dash.cloudflare.com → Workers & Pages → Create → Pages → **Upload assets**（直接拖入 `dist` 文件夹，无需 Git）
@@ -86,8 +96,10 @@ PWA 安装需要 HTTPS，推荐 Cloudflare Pages（免费）：
 ## 路线图（未实现）
 
 - 世界书语义检索（embedding 触发，替代/叠加关键词）
-- 时间线分支与存档点
 - 多角色群聊（独立角色 agent）
-- 事件钩子（剧情事件触发世界书规则）
 
-**正在测试开发中，上传仓库是为了方便管理。目前一些功能仍在设想，暂不建议使用，谢谢大家！**
+已完成：事件钩子（剧情事件触发世界书规则）、时间线分支与存档点、多模型支持、
+提取审计与回溯、消息级编辑、滚动摘要、自动快照等——详见提交历史与上文功能说明。
+
+> 版本状态：**Alpha（0.5.0）**。核心功能可日常使用；多角色群聊与世界书语义检索尚未实现。
+> 数据全部本地存储，升级 / 迁移前请先「设置 → 导出备份」。

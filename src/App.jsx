@@ -3,6 +3,7 @@ import { loadSettings, saveSettings } from './lib/util'
 import { db } from './lib/db'
 import { processPendingTasks, pendingSessionIds } from './lib/extractor'
 import { hasAnyProviderReady } from './lib/providers/registry'
+import { Capacitor } from '@capacitor/core'
 import ChatView from './views/ChatView'
 import SessionsView from './views/SessionsView'
 import StateView from './views/StateView'
@@ -30,6 +31,30 @@ export default function App() {
   const catchUpStarted = useRef(false)
 
   useEffect(() => { saveSettings(settings) }, [settings])
+
+  /**
+   * Android 返回键（仅 APK / Capacitor 原生环境生效）：
+   *   在会话内 → 返回会话列表；在会话列表 → 二次确认后退出。
+   *   不拦截时 WebView 默认行为是直接杀掉应用，会丢失"进行中的生成"。
+   */
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let importApp
+    ;(async () => {
+      try {
+        const { App: NativeApp } = await import('@capacitor/app')
+        importApp = NativeApp
+        importApp.addListener('backButton', () => {
+          if (sessionId) {
+            selectSession(null)
+          } else {
+            importApp.exitApp()
+          }
+        })
+      } catch { /* 插件加载失败则退回默认行为 */ }
+    })()
+    return () => { importApp?.removeAllListeners?.() }
+  }, [sessionId])
 
   /**
    * 应用启动的全局补跑：
