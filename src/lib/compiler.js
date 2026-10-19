@@ -23,6 +23,15 @@ export function cardText(card) {
   return p.filter(Boolean).join('\n\n')
 }
 
+/** keys 字段容错归一：规范为字符串（数组 join、其他强转），外部工具产的卡可能给数组 */
+function loreKeys(e) {
+  const raw = Array.isArray(e.keys) ? e.keys.join('，') : e.keys
+  return String(raw ?? '')
+    .split(/[,，]/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+}
+
 /** 关键词触发世界书：常驻条目恒注入，其余按近期文本命中；按优先级排序、token 预算裁剪 */
 export function matchLore(entries, recentText, budget = 600) {
   const text = (recentText || '').toLowerCase()
@@ -30,7 +39,7 @@ export function matchLore(entries, recentText, budget = 600) {
     .filter((e) => e.enabled !== false)
     .filter((e) => {
       if (e.constant) return true
-      const keys = (e.keys || '').split(/[,，]/).map((s) => s.trim().toLowerCase()).filter(Boolean)
+      const keys = loreKeys(e)
       return keys.some((k) => text.includes(k))
     })
     .sort((a, b) => (b.priority || 0) - (a.priority || 0))

@@ -11,7 +11,18 @@ const DEFAULTS = { keys: '', content: '', priority: 0, constant: false, enabled:
 export const newUid = () => `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
 
 /**
- * 规范化条目列表：补 uid、去 uid 重复、补默认字段、剔除非法项。
+ * keys 字段归一：规范是「逗号分隔字符串」，但外部数据（手工构造的 JSON、
+ * 其他工具转换的卡、全量备份）可能给数组——统一转字符串，绝不让数组流进
+ * 消费端（matchLore 会对 keys 调 .split，数组直接 TypeError）。
+ */
+function normKeys(raw) {
+  if (Array.isArray(raw)) return raw.map((k) => String(k ?? '').trim()).filter(Boolean).join('，')
+  if (raw == null) return ''
+  return String(raw)
+}
+
+/**
+ * 规范化条目列表：补 uid、去 uid 重复、补默认字段、keys 归一为字符串、剔除非法项。
  * 对已规范化的输入是**幂等**的（uid 与字段都不再变化），可安全重复调用。
  */
 export function normalizeLore(list) {
@@ -22,7 +33,7 @@ export function normalizeLore(list) {
     let uid = typeof e.uid === 'string' && e.uid && !seen.has(e.uid) ? e.uid : null
     if (!uid) { do { uid = newUid() } while (seen.has(uid)) }
     seen.add(uid)
-    return { ...DEFAULTS, ...e, uid }
+    return { ...DEFAULTS, ...e, keys: normKeys(e.keys), uid }
   }).filter(Boolean)
 }
 

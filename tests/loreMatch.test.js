@@ -56,6 +56,17 @@ describe('M · matchLore（世界书触发）', () => {
     expect(matchLore([], 'x')).toEqual([])
     expect(matchLore([e({ keys: '码头', content: 'c' })], null)).toEqual([])
   })
+
+  it('M10 keys 是数组也不崩，且能正常命中（外部工具产的卡防御）', () => {
+    // 实测崩溃场景：手工/转换工具构造的卡把 keys 写成数组 → .split TypeError
+    const entry = { enabled: true, priority: 0, keys: ['西码头', '火灾'], content: '仓库设定' }
+    expect(matchLore([entry], '西码头那场火')).toEqual(['仓库设定'])
+    expect(matchLore([entry], '无关文本')).toEqual([])
+    // 其他脏形状：数字、对象 → 强转字符串不崩
+    expect(() => matchLore([e({ keys: 123, content: 'c' })], 'x')).not.toThrow()
+    expect(() => matchLore([e({ keys: { a: 1 }, content: 'c' })], 'x')).not.toThrow()
+    expect(() => matchLore([e({ keys: null, content: 'c' })], 'x')).not.toThrow()
+  })
 })
 
 describe('S · substMacros（宏替换）', () => {

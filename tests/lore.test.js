@@ -25,6 +25,22 @@ describe('T2 · lib/lore', () => {
     expect(e).toMatchObject({ priority: 0, constant: false, enabled: true })
   })
 
+  it('T2-1c normalizeLore 把 keys 归一为字符串（数组 join、null 置空、非字符串强转）', () => {
+    // 实测崩溃场景：外部构造的卡把 keys 写成数组 → matchLore 调 .split 直接 TypeError
+    const [a, b, c, d] = normalizeLore([
+      { keys: ['西码头', '火灾'], content: 'a' },
+      { keys: null, content: 'b' },
+      { keys: 123, content: 'c' },
+      { content: 'd' },
+    ])
+    expect(a.keys).toBe('西码头，火灾')
+    expect(b.keys).toBe('')
+    expect(c.keys).toBe('123')
+    expect(d.keys).toBe('')
+    // 幂等：字符串 keys 二次归一不变
+    expect(normalizeLore([{ keys: '甲，乙', content: 'x' }])[0].keys).toBe('甲，乙')
+  })
+
   it('T2-2 命门：uid 缺失时不做任何删除（undefined / null 都不清空）', () => {
     expect(removeLore(raw(), undefined)).toHaveLength(3)
     expect(removeLore(raw(), null)).toHaveLength(3)
