@@ -3,7 +3,11 @@
   "appName": "RP Engine",
   "webDir": "dist",
   "android": {
-    "insetsHandling": "native",
     "initialViewportFitValueHint": "cover"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "native"
+    }
   }
 }

@@ -24,7 +24,11 @@ body {
 a { color: var(--gold); }
 
 /* ---------- 布局 ---------- */
-.app { display: flex; flex-direction: column; height: 100%; max-width: 720px; margin: 0 auto; }
+/* 安全区：APK（edge-to-edge）下顶部避开状态栏/摄像头孔；浏览器与旧 WebView 下 env() 为 0，无副作用 */
+.app {
+  display: flex; flex-direction: column; height: 100%; max-width: 720px; margin: 0 auto;
+  padding-top: env(safe-area-inset-top);
+}
 main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .tabbar {
   display: flex; border-top: 1px solid var(--line); background: var(--panel);
