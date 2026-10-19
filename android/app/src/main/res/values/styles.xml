@@ -13,6 +13,8 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- edge-to-edge：窗口背景与 WebView 深色一致，insets 避让区（状态栏/手势条）无白边 -->
+        <item name="android:windowBackground">@color/windowBackground</item>
     </style>
 
 

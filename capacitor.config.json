@@ -3,6 +3,7 @@
   "appName": "RP Engine",
   "webDir": "dist",
   "android": {
-    "adjustMarginsForEdgeToEdge": "force"
+    "insetsHandling": "native",
+    "initialViewportFitValueHint": "cover"
   }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 窗口背景：native insets 模式下，状态栏/手势条避让区露出的就是这个色。
+         与应用页面背景色 #14161b 一致，视觉上无缝。 -->
+    <color name="windowBackground">#14161B</color>
+</resources>
