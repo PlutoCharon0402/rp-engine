@@ -122,7 +122,7 @@ export default function ModelSettings({ settings, onChange }) {
               <span className="muted">{statusText(p)}</span>
             </span>
             {settings.providerId === p.id ? (
-              <span className="badge">对话默认</span>
+              <span className="btn small is-current">对话默认</span>
             ) : (
               <button className="btn small" onClick={() => setDefault(p)}>设为默认</button>
             )}
