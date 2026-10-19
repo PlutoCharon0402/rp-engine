@@ -89,7 +89,10 @@ export default function ModelSettings({ settings, onChange }) {
       const j = await res.json()
       const ids = (j.data || []).map((m) => m.id).filter(Boolean)
       if (!ids.length) throw new Error('接口未返回任何模型')
-      setTest({ ok: true, text: `连接正常，可用模型 ${ids.length} 个`, ids })
+      // 把接口清单合并进「模型列表」（接口的在前，与手填条目去重）——
+      // 旧版行为回归：测试连接后下拉菜单应显示拉取到的模型，而不是只停留在预设
+      setEditing((prev) => (prev ? { ...prev, models: [...new Set([...ids, ...(prev.models || [])])] } : prev))
+      setTest({ ok: true, text: `连接正常，可用模型 ${ids.length} 个（已同步到模型列表）`, ids })
     } catch (e) {
       setTest({ ok: false, text: `连接失败：${e.message}` })
     } finally {
