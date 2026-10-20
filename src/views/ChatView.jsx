@@ -7,8 +7,12 @@ import { allProviders, getProvider, hasAnyProviderReady } from '../lib/providers
 import { resolveCard, CARD_SOURCE_LABEL } from '../lib/cardRef'
 import { effectiveSettings, fmtTokens } from '../lib/util'
 import { summarizePlan, runSummary } from '../lib/summarize'
+import Dropdown from '../components/Dropdown'
 
 const QUICK_CHIPS = ['（请继续）', '（时间推进到次日）', '（切换场景）']
+
+/** 导演指令条目 id：d + 时间戳 + 随机后缀（避免同毫秒撞号） */
+const newDirId = () => `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`
 
 /** 参数输入框取值：未设置 → 空串（表示跟随全局） */
 const numOrEmpty = (v) => (v === null || v === undefined || v === '' ? '' : v)
@@ -39,11 +43,15 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
   const [menu, setMenu] = useState(null)   // 消息操作弹层：当前消息对象
   const [editText, setEditText] = useState(null) // null=非编辑态；string=正在编辑该消息
   const [showParams, setShowParams] = useState(false) // 本故事参数覆盖弹层
+  const [dirDraft, setDirDraft] = useState(null)      // C8：导演指令弹层的本地草稿（null=关闭）；关闭时统一写库
   const scrollRef = useRef(null)
   const abortRef = useRef(null)            // 进行中的流式请求，用于「停止」
   const busy = streaming !== null
   // 本故事参数覆盖：session.params 里填了的字段盖过全局设置，没填的跟随全局
   const eff = effectiveSettings(settings, session?.params)
+  // 导演指令状态（老会话无 director 字段 → 读侧兜底为「启用 + 空列表」）
+  const director = session?.director || { enabled: true, notes: [] }
+  const directorOn = director.enabled !== false && director.notes.some((n) => String(n?.text || '').trim())
 
   useEffect(() => {
     (async () => {
@@ -72,6 +80,27 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     const s = await db.sessions.get(sessionId)
     setSession(s)
     onSessionUpdate && onSessionUpdate()
+  }
+
+  /* ── 导演指令（C8）：用户对扮演者的执导要求，注入 prompt 但不属于剧情 ── */
+
+  /** 打开弹层：以库内数据为草稿起点 */
+  function openDirector() {
+    setDirDraft({ enabled: director.enabled !== false, notes: director.notes.map((n) => ({ ...n })), newText: '' })
+  }
+
+  /** 关闭弹层：草稿统一写库（编辑过程中不落盘，避免每键一次 IndexedDB 写入） */
+  async function closeDirector() {
+    if (dirDraft) {
+      const notes = dirDraft.notes
+        .map((n) => ({ id: n.id, text: String(n.text || '').trim(), createdAt: n.createdAt }))
+        .filter((n) => n.text)
+      const add = String(dirDraft.newText || '').trim()
+      if (add) notes.push({ id: newDirId(), text: add, createdAt: Date.now() })
+      await db.sessions.update(sessionId, { director: { enabled: dirDraft.enabled !== false, notes }, updatedAt: Date.now() })
+      refreshSession()
+    }
+    setDirDraft(null)
   }
 
   /** 累计本次生成的 token 到会话（modify 函数内自增，避免读改写竞态）。
@@ -155,7 +184,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       const lore = [...(await db.lore.toArray()), ...(session?.lore || [])] // 全局 + 本故事专属
       const api = makeApi(eff)
       // 批次8：pendingHints 是事件钩子排队的一次性剧情提示，注入本回合后即被消费清空
-      const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary, session?.pendingHints)
+      const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary, session?.pendingHints, session?.director)
       // 续写：以指令消息收尾让模型顺着最后一段继续；指令不落库，不污染历史
       if (opts.instruction) compiled.push({ role: 'user', content: opts.instruction })
       for await (const delta of api.stream(compiled, {
@@ -397,6 +426,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
           {cardSource === 'missing' && <span className="badge err">{CARD_SOURCE_LABEL.missing}</span>}
         </div>
         <div className="head-actions">
+          <button className={`icon-btn ${directorOn ? 'is-on' : ''}`} title="导演指令" onClick={() => openDirector()}>🎬</button>
           <button className="icon-btn" title="本故事参数" onClick={() => setShowParams(true)}>⚙</button>
           {busy ? (
             <button className="btn small danger-text" onClick={stopStreaming}>停止</button>
@@ -509,6 +539,66 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
         </div>
       )}
 
+      {/* 导演指令（C8）：执导要求注入 prompt，但不属于剧情 */}
+      {dirDraft && (
+        <div className="modal-mask" onClick={closeDirector}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>导演指令</h3>
+            <p className="muted small">
+              写给扮演者的执导要求——怎么演、文风怎么改。AI 会遵循，但不会把它当剧情内容。关闭弹层时保存，下一回合生效。
+            </p>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '8px 0' }}>
+              <input
+                type="checkbox"
+                checked={dirDraft.enabled !== false}
+                onChange={(e) => setDirDraft({ ...dirDraft, enabled: e.target.checked })}
+              />
+              启用（停用时保留内容，只是不再注入）
+            </label>
+            {dirDraft.notes.map((n, i) => (
+              <div className="row" key={n.id} style={{ alignItems: 'flex-start' }}>
+                <textarea
+                  className="input" rows={2} value={n.text}
+                  onChange={(e) => setDirDraft({ ...dirDraft, notes: dirDraft.notes.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
+                />
+                <button
+                  className="btn small danger-text" style={{ flexShrink: 0 }}
+                  onClick={() => setDirDraft({ ...dirDraft, notes: dirDraft.notes.filter((_, j) => j !== i) })}
+                >删</button>
+              </div>
+            ))}
+            <div className="row">
+              <input
+                className="input" value={dirDraft.newText}
+                placeholder="例：文风再冷一点，少用感叹号"
+                onChange={(e) => setDirDraft({ ...dirDraft, newText: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.target.value.trim()) {
+                    e.preventDefault()
+                    setDirDraft({ ...dirDraft, notes: [...dirDraft.notes, { id: newDirId(), text: e.target.value.trim(), createdAt: Date.now() }], newText: '' })
+                  }
+                }}
+              />
+              <button
+                className="btn"
+                onClick={() => {
+                  const t = String(dirDraft.newText || '').trim()
+                  if (!t) return
+                  setDirDraft({ ...dirDraft, notes: [...dirDraft.notes, { id: newDirId(), text: t, createdAt: Date.now() }], newText: '' })
+                }}
+              >添加</button>
+            </div>
+            <p className="muted small">
+              {dirDraft.notes.length} 条 · 约 {dirDraft.notes.reduce((a, n) => a + String(n.text || '').length, 0)} 字
+              {dirDraft.enabled === false ? ' · 已停用' : ''}
+            </p>
+            <div className="row-end">
+              <button className="btn" onClick={closeDirector}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 本故事参数覆盖：留空 = 跟随全局 */}
       {showParams && (
         <div className="modal-mask" onClick={() => setShowParams(false)}>
@@ -517,33 +607,30 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
             <p className="muted small">留空即跟随「设置」页的全局值，只影响当前故事。</p>
             <div className="field-grid">
               <label>提供商
-                <select
-                  className="input"
+                <Dropdown
                   value={session?.params?.providerId ?? ''}
-                  onChange={(e) => { setParam('providerId', e.target.value); setParam('model', '') }}
-                >
-                  <option value="">跟随全局（{getProvider(settings, settings.providerId)?.displayName || settings.providerId}）</option>
-                  {allProviders(settings).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.displayName}{p.noKey && !p.displayName.includes('本机') ? '（本机）' : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => { setParam('providerId', v); setParam('model', '') }}
+                  options={[
+                    { value: '', label: `跟随全局（${getProvider(settings, settings.providerId)?.displayName || settings.providerId}）` },
+                    ...allProviders(settings).map((p) => ({
+                      value: p.id,
+                      label: p.displayName + (p.noKey && !p.displayName.includes('本机') ? '（本机）' : ''),
+                    })),
+                  ]}
+                />
               </label>
               <label>模型
-                <select
-                  className="input"
+                <Dropdown
                   value={session?.params?.model ?? ''}
-                  onChange={(e) => setParam('model', e.target.value)}
-                >
-                  <option value="">
-                    跟随全局（{paramProvider?.id === settings.providerId ? settings.model : paramProvider?.defaultModel || ''}）
-                  </option>
-                  {session?.params?.model && !paramModels.includes(session.params.model) && (
-                    <option value={session.params.model}>{session.params.model}（当前值）</option>
-                  )}
-                  {paramModels.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
+                  onChange={(v) => setParam('model', v)}
+                  options={[
+                    { value: '', label: `跟随全局（${paramProvider?.id === settings.providerId ? settings.model : paramProvider?.defaultModel || ''}）` },
+                    ...(session?.params?.model && !paramModels.includes(session.params.model)
+                      ? [{ value: session.params.model, label: `${session.params.model}（当前值）` }]
+                      : []),
+                    ...paramModels.map((m) => ({ value: m, label: m })),
+                  ]}
+                />
               </label>
               <label>温度
                 <input className="input" type="number" step="0.05" min="0" max="2" value={numOrEmpty(session?.params?.temperature)} placeholder={String(settings.temperature)}

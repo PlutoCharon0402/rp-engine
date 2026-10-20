@@ -43,6 +43,7 @@ export default function SessionsView({ onSelect, onGoChars }) {
       lore: normalizeLore(card.embeddedLore || []),
       params: {},        // 批次4：本故事参数覆盖，空 = 全部跟随全局
       usage: emptyUsage(), // 批次4：token 累计（新增普通字段，无需升版本）
+      director: { enabled: true, notes: [] }, // C8：导演指令（普通新字段，旧会话读侧兜底）
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })

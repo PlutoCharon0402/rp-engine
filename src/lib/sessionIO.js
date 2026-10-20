@@ -41,6 +41,8 @@ export async function buildSessionExport(sessionId) {
       })),
       hookLog: session.hookLog || [],
       pendingHints: session.pendingHints || [],
+      // C8：导演指令随会话导出；旧文件导入时读侧兜底为「启用 + 空列表」
+      director: session.director || { enabled: true, notes: [] },
     },
     card: card ? {
       name: card.name,

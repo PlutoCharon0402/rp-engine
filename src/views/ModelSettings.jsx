@@ -2,6 +2,7 @@
 //   厂商注册表（内置 + 自定义）→ 编辑 / 测试 / 设为默认；对话默认模型；
 //   模型路由（状态提取 / 剧情摘要走哪家）；故障转移链；各厂商性能表现（metrics 聚合）。
 import { useEffect, useState } from 'react'
+import Dropdown from '../components/Dropdown'
 import {
   allProviders, getProvider, providerReady, BUILTIN_PROVIDERS, CUSTOM_TEMPLATE,
 } from '../lib/providers/registry'
@@ -140,26 +141,24 @@ export default function ModelSettings({ settings, onChange }) {
       {/* 对话默认模型 */}
       <label className="lbl">对话默认模型</label>
       <div className="field-grid">
-        <select
-          className="input"
+        <Dropdown
           value={settings.providerId}
-          onChange={(e) => {
-            const p = getProvider(settings, e.target.value)
-            onChange({ ...settings, providerId: e.target.value, model: p?.defaultModel || p?.models[0] || '' })
+          onChange={(v) => {
+            const p = getProvider(settings, v)
+            onChange({ ...settings, providerId: v, model: p?.defaultModel || p?.models[0] || '' })
           }}
-        >
-          {providers.map((p) => <option key={p.id} value={p.id}>{p.displayName}</option>)}
-        </select>
-        <select
-          className="input"
+          options={providers.map((p) => ({ value: p.id, label: p.displayName }))}
+        />
+        <Dropdown
           value={settings.model}
-          onChange={(e) => onChange({ ...settings, model: e.target.value })}
-        >
-          {!defaultProvider?.models?.includes(settings.model) && settings.model && (
-            <option value={settings.model}>{settings.model}（当前值）</option>
-          )}
-          {(defaultProvider?.models || []).map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
+          onChange={(v) => onChange({ ...settings, model: v })}
+          options={[
+            ...(!defaultProvider?.models?.includes(settings.model) && settings.model
+              ? [{ value: settings.model, label: `${settings.model}（当前值）` }]
+              : []),
+            ...(defaultProvider?.models || []).map((m) => ({ value: m, label: m })),
+          ]}
+        />
       </div>
 
       {/* 模型路由：非对话用途 */}
@@ -169,24 +168,24 @@ export default function ModelSettings({ settings, onChange }) {
         return (
           <div key={key} className="field-grid">
             <label>{label}
-              <select
-                className="input"
+              <Dropdown
                 value={routing[key]?.providerId || ''}
-                onChange={(e) => setRouting(key, { providerId: e.target.value, model: '' })}
-              >
-                <option value="">跟随对话默认</option>
-                {providers.map((x) => <option key={x.id} value={x.id}>{x.displayName}</option>)}
-              </select>
+                onChange={(v) => setRouting(key, { providerId: v, model: '' })}
+                options={[
+                  { value: '', label: '跟随对话默认' },
+                  ...providers.map((x) => ({ value: x.id, label: x.displayName })),
+                ]}
+              />
             </label>
             <label>模型
-              <select
-                className="input"
+              <Dropdown
                 value={routing[key]?.model || ''}
-                onChange={(e) => setRouting(key, { model: e.target.value })}
-              >
-                <option value="">默认</option>
-                {(p?.models || []).map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
+                onChange={(v) => setRouting(key, { model: v })}
+                options={[
+                  { value: '', label: '默认' },
+                  ...(p?.models || []).map((m) => ({ value: m, label: m })),
+                ]}
+              />
             </label>
           </div>
         )
@@ -254,10 +253,14 @@ export default function ModelSettings({ settings, onChange }) {
                 <input className="input" value={editing.displayName} onChange={(e) => setEditing({ ...editing, displayName: e.target.value })} />
               </label>
               <label>协议
-                <select className="input" value={editing.adapter} onChange={(e) => setEditing({ ...editing, adapter: e.target.value })}>
-                  <option value="openai">OpenAI 兼容（绝大多数服务）</option>
-                  <option value="anthropic">Anthropic（Claude）</option>
-                </select>
+                <Dropdown
+                  value={editing.adapter}
+                  onChange={(v) => setEditing({ ...editing, adapter: v })}
+                  options={[
+                    { value: 'openai', label: 'OpenAI 兼容（绝大多数服务）' },
+                    { value: 'anthropic', label: 'Anthropic（Claude）' },
+                  ]}
+                />
               </label>
               <label className="span2">接口地址
                 <input className="input" value={editing.endpoint} onChange={(e) => setEditing({ ...editing, endpoint: e.target.value })} placeholder="https://…/v1" />
@@ -273,10 +276,14 @@ export default function ModelSettings({ settings, onChange }) {
                 />
               </label>
               <label>默认模型
-                <select className="input" value={editing.defaultModel} onChange={(e) => setEditing({ ...editing, defaultModel: e.target.value })}>
-                  <option value="">（列表第一个）</option>
-                  {(editing.models || []).map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
+                <Dropdown
+                  value={editing.defaultModel}
+                  onChange={(v) => setEditing({ ...editing, defaultModel: v })}
+                  options={[
+                    { value: '', label: '（列表第一个）' },
+                    ...(editing.models || []).map((m) => ({ value: m, label: m })),
+                  ]}
+                />
               </label>
               <label>上下文窗口（token）
                 <input className="input" type="number" value={editing.context} onChange={(e) => setEditing({ ...editing, context: Number(e.target.value) || 32768 })} />

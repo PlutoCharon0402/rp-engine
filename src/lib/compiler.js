@@ -113,15 +113,25 @@ export function trimHistory(history, maxHistory, budgetTokens) {
 
 /**
  * 编译最终 messages。
- * 布局（前缀缓存友好）：[system: 角色卡+常驻设定] → 全部历史 → [system: 状态+触发世界书] → 最后 depth 条消息
+ * 布局（前缀缓存友好）：[system: 角色卡+常驻设定+导演指令] → 全部历史 → [system: 状态+触发世界书] → 最后 depth 条消息
  * depth=1 时：动态块紧贴最新用户消息之前——prompt 仍以用户行动收尾（扮演效果好），
  * 且静态前缀+历史构成逐字节稳定的前缀（历史只增不改），缓存命中率随对话增长趋近上限。
  * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息。
  * @param hints 事件钩子的一次性剧情提示（批次8）：注入后由调用方消费清空
+ * @param director 导演指令（C8）：{ enabled, notes: [{ id, text, createdAt }] }——用户对扮演者的
+ *                 执导要求。相对稳定，故并入静态前缀（改指令才会破坏前缀缓存，可接受）；
+ *                 与角色卡解耦：卡是「角色是谁」，导演指令是「用户要求 AI 怎么演」
  */
-export function compileMessages(card, lore, state, history, settings, summary, hints) {
+export function compileMessages(card, lore, state, history, settings, summary, hints, director) {
   const constant = (lore || []).filter((e) => e.enabled !== false && e.constant).map((e) => substMacros(e.content, card))
-  const messages = [{ role: 'system', content: [cardText(card), ...constant].filter(Boolean).join('\n\n') }]
+  const directorNotes = (director && director.enabled === false ? [] : (director?.notes || []))
+    .map((n) => String(n?.text || '').trim())
+    .filter(Boolean)
+    .map((t) => substMacros(t, card))
+  const directorBlock = directorNotes.length
+    ? `## 导演指令（用户对扮演者的要求，遵循它，但不要把它当剧情内容）\n${directorNotes.map((t) => `- ${t}`).join('\n')}`
+    : ''
+  const messages = [{ role: 'system', content: [cardText(card), ...constant, directorBlock].filter(Boolean).join('\n\n') }]
 
   // 窗口预算 = 模型上下文 − 静态前缀 − 输出预留 − 动态块粗略预留（状态/世界书/摘要）
   const ctx = contextWindowTokens(settings)

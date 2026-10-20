@@ -135,3 +135,40 @@ describe('C3 · 宏与边界', () => {
     expect(dyn3.content).not.toContain('临时堆场')
   })
 })
+
+describe('C4 · 导演指令（C8：用户对扮演者的执导要求）', () => {
+  const director = {
+    enabled: true,
+    notes: [
+      { id: 'd1', text: '文风再冷一点，少用感叹号', createdAt: 1 },
+      { id: 'd2', text: '{{char}}先别揭穿他，吊着', createdAt: 2 },
+    ],
+  }
+
+  it('注入静态前缀（第 0 条 system），多条指令都在', () => {
+    const sys = compileMessages(card, lore, state, history, settings, null, null, director)[0].content
+    expect(sys).toContain('## 导演指令')
+    expect(sys).toContain('文风再冷一点，少用感叹号')
+    expect(sys).toContain('沈砚先别揭穿他，吊着') // 指令支持 {{char}} 宏
+    expect(sys).not.toContain('{{char}}')
+  })
+
+  it('enabled=false 时整段不注入（保留数据，只是不进 prompt）', () => {
+    const sys = compileMessages(card, lore, state, history, settings, null, null, { ...director, enabled: false })[0].content
+    expect(sys).not.toContain('导演指令')
+    expect(sys).not.toContain('文风再冷')
+  })
+
+  it('空指令列表 / 纯空白文本 / director 缺省：都不注入', () => {
+    expect(compileMessages(card, lore, state, history, settings, null, null, { enabled: true, notes: [] })[0].content).not.toContain('导演指令')
+    expect(compileMessages(card, lore, state, history, settings, null, null, { enabled: true, notes: [{ id: 'x', text: '   ', createdAt: 1 }] })[0].content).not.toContain('导演指令')
+    expect(compileMessages(card, lore, state, history, settings, null, null, undefined)[0].content).not.toContain('导演指令')
+  })
+
+  it('与动态块解耦：导演指令不进动态 system（在稳定前缀里，利于缓存）', () => {
+    const msgs = compileMessages(card, lore, state, history, settings, '摘要', null, director)
+    expect(msgs[0].content).toContain('导演指令')
+    const dyn = msgs.find((m) => m.role === 'system' && m.content.includes('当前世界状态'))
+    expect(dyn.content).not.toContain('导演指令')
+  })
+})

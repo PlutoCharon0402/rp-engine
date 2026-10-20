@@ -58,6 +58,7 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   padding: 6px 10px; cursor: pointer; flex-shrink: 0;
 }
 .icon-btn.danger { color: var(--danger); }
+.icon-btn.is-on { color: var(--gold); } /* 导演指令在场（启用且有内容）时的状态标记 */
 .input {
   width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--panel); color: var(--text); font-size: 15px; font-family: inherit;
@@ -65,6 +66,18 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 }
 .input:focus { border-color: var(--gold); }
 .input.mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+
+/* ---------- 自定义下拉（B6：替代原生 select，系统菜单白底与主题脱节） ---------- */
+.dropdown { position: relative; }
+.dropdown-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; text-align: left; resize: none; white-space: nowrap; }
+.dropdown-value { overflow: hidden; text-overflow: ellipsis; }
+.dropdown-value.is-placeholder { color: var(--muted); }
+.dropdown-arrow { flex-shrink: 0; color: var(--muted); font-size: 12px; transition: transform .15s ease; }
+.dropdown-arrow.is-open { transform: rotate(180deg); }
+.dropdown-menu { position: absolute; z-index: 90; top: calc(100% + 4px); left: 0; right: 0; max-height: 320px; overflow-y: auto; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); padding: 4px; }
+.dropdown-item { display: block; width: 100%; min-height: 40px; padding: 9px 10px; background: none; border: 0; border-radius: 6px; color: var(--text); font-family: inherit; font-size: 14px; line-height: 1.35; text-align: left; cursor: pointer; white-space: normal; word-break: break-all; }
+.dropdown-item:hover { background: rgba(255, 255, 255, .06); }
+.dropdown-item.is-active { background: var(--gold-dim); color: var(--gold); }
 .lbl { display: block; margin: 12px 0 5px; font-size: 13px; color: var(--muted); }
 .grow { flex: 1; }
 .row { display: flex; gap: 8px; margin: 8px 0; }
