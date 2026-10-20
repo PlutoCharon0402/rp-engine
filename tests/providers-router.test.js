@@ -61,6 +61,23 @@ describe('RT1 · 优先级与过滤', () => {
     const chain2 = routeChain({ ...base, fallbackIds: ['moonshot'] }, 'chat', {})
     expect(chain2[1].model).toBe('kimi-latest')
   })
+
+  it('实测崩溃修复：显式选择的模型名不带给故障转移厂商（防 INVALID_REQUEST）', () => {
+    // 场景：⚙ 显式选了 moonshot + kimi → moonshot 熔断 → 转移到 deepseek 时
+    // 模型名仍是 kimi-latest → DeepSeek 收到不存在的模型 → 400 INVALID_REQUEST
+    const chain = routeChain(base, 'chat', { providerId: 'moonshot', model: 'kimi-latest' })
+    expect(chain.map((t) => t.provider.id)).toEqual(['moonshot', 'deepseek']) // deepseek 兜底在链上
+    expect(chain[1].model).toBe('deepseek-chat') // 用自己的 defaultModel，不是 kimi-latest
+  })
+
+  it('实测崩溃修复：override 只设了 model 没设厂商（跟随全局）时，同样不漏给 fallback 厂商', () => {
+    const s = { ...base, providerId: 'moonshot' } // 全局默认 moonshot
+    const chain = routeChain(s, 'chat', { model: 'kimi-latest' }) // ⚙ 只改了模型
+    expect(chain[0].provider.id).toBe('moonshot')
+    expect(chain[0].model).toBe('kimi-latest')
+    expect(chain[1].provider.id).toBe('deepseek') // 兜底链上有 deepseek
+    expect(chain[1].model).toBe('deepseek-chat') // 不继承 kimi-latest
+  })
 })
 
 describe('RT2 · 显式选择校验 explicitUnavailable', () => {

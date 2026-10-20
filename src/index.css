@@ -88,6 +88,10 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .small { font-size: 13px; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+/* grid 轨道 1fr 的隐式最小值是 item 的 min-content：长文本（nowrap 的下拉、
+   不可断行的 URL）会把轨道撑出视口导致整页横向滚动。item 层归零 min-width
+   是收缩链的根，配合 .dropdown 内层的 min-width:0 一起生效 */
+.field-grid > * { min-width: 0; }
 .field-grid .span2 { grid-column: span 2; }
 .field-grid label { font-size: 13px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
 

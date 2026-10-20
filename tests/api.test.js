@@ -114,7 +114,7 @@ describe('A3 · 错误处理', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, text: async () => 'unauthorized' })))
     await expect((async () => {
       for await (const _ of makeApi({ apiKey: 'k' }).stream([{ role: 'user', content: 'hi' }])) { /* 消费 */ }
-    })()).rejects.toThrow(/deepseek（AUTH）/)
+    })()).rejects.toThrow(/deepseek（AUTH：/) // alpha.9 起错误信息带服务端详情，断言到「详情开始」即可
   })
 
   it('非流式：正常返回文本', async () => {
@@ -131,7 +131,7 @@ describe('A3 · 错误处理', () => {
 
   it('非流式：非 2xx 抛错（可重试错误会先重试再报）', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, text: async () => 'boom' })))
-    await expect(makeApi({ apiKey: 'k' }).complete([])).rejects.toThrow(/deepseek（SERVER）/)
+    await expect(makeApi({ apiKey: 'k' }).complete([])).rejects.toThrow(/deepseek（SERVER：/)
   })
 
   it('缺 Key：构造不抛错，调用时抛"尚未配置"且不发请求', async () => {

@@ -146,7 +146,10 @@ export function createChatClient(settings, inj = {}) {
           return
         } catch (err) {
           breakerRecord(t.provider.id, false)
-          attempts.push({ provider: t.provider.id, errorCode: err.code || 'UNKNOWN', ms: Date.now() - t0 })
+          attempts.push({
+            provider: t.provider.id, errorCode: err.code || 'UNKNOWN', ms: Date.now() - t0,
+            detail: String(err.message || '').slice(0, 120), // 服务端原因透出，便于定位（如模型名不存在）
+          })
           recordCall({
             ok: false, purpose: req.purpose, provider: t.provider.id, model: t.model,
             isFallback: ti > 0, attempts: attempts.length, errorCode: err.code || 'UNKNOWN',
@@ -159,7 +162,7 @@ export function createChatClient(settings, inj = {}) {
       }
       throw new ProviderError(
         'SERVER',
-        `全部模型厂商均失败：${attempts.map((a) => `${a.provider}（${a.errorCode}）`).join(' → ')}。请到「设置」页检查各厂商的 Key 与端点。`,
+        `全部模型厂商均失败：${attempts.map((a) => `${a.provider}（${a.errorCode}${a.detail ? `：${a.detail}` : ''}）`).join(' → ')}。请到「设置」页检查各厂商的 Key 与端点。`,
         { raw: attempts },
       )
     },
@@ -198,7 +201,10 @@ export function createChatClient(settings, inj = {}) {
         } catch (err) {
           const e = fromFetchError(err, t.provider.id)
           breakerRecord(t.provider.id, false)
-          attempts.push({ provider: t.provider.id, errorCode: e.code || 'UNKNOWN', ms: Date.now() - t0 })
+          attempts.push({
+            provider: t.provider.id, errorCode: e.code || 'UNKNOWN', ms: Date.now() - t0,
+            detail: String(e.message || '').slice(0, 120),
+          })
           recordCall({
             ok: false, purpose: req.purpose, provider: t.provider.id, model: t.model,
             isFallback: ti > 0, attempts: attempts.length, errorCode: e.code || 'UNKNOWN',
@@ -210,7 +216,7 @@ export function createChatClient(settings, inj = {}) {
       }
       throw new ProviderError(
         'SERVER',
-        `全部模型厂商均失败：${attempts.map((a) => `${a.provider}（${a.errorCode}）`).join(' → ')}。请到「设置」页检查各厂商的 Key 与端点。`,
+        `全部模型厂商均失败：${attempts.map((a) => `${a.provider}（${a.errorCode}${a.detail ? `：${a.detail}` : ''}）`).join(' → ')}。请到「设置」页检查各厂商的 Key 与端点。`,
         { raw: attempts },
       )
     },

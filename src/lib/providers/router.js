@@ -16,7 +16,12 @@ import { allProviders, getProvider, providerReady } from './registry'
 
 /** 解析某个目标的实际模型：显式 > 路由配置 > 对话默认模型 > 厂商默认模型 */
 function pickModel(settings, provider, purpose, override) {
-  if (purpose === 'chat' && override?.model) return override.model
+  // 显式选择的模型只对「它所属的厂商」（显式厂商，未显式时=全局默认厂商）有效——
+  // 故障转移到其他厂商时模型名不通用（把 qwen 的模型名发给 deepseek 会得到 INVALID_REQUEST）
+  const overrideOwner = override?.providerId || settings.providerId
+  if (purpose === 'chat' && override?.model && provider.id === overrideOwner) {
+    return override.model
+  }
   const routed = settings.routing?.[purpose]
   if (routed?.model && routed.providerId === provider.id) return routed.model
   if (provider.id === settings.providerId && settings.model) return settings.model
