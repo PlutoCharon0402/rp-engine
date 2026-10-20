@@ -3,11 +3,10 @@ import { db, getTimeline, setTimelineHead } from '../lib/db'
 import { compileMessages } from '../lib/compiler'
 import { processPendingTasks, enqueueTask } from '../lib/extractor'
 import { makeApi } from '../lib/api'
-import { allProviders, getProvider, hasAnyProviderReady } from '../lib/providers/registry'
+import { hasAnyProviderReady } from '../lib/providers/registry'
 import { resolveCard, CARD_SOURCE_LABEL } from '../lib/cardRef'
 import { effectiveSettings, fmtTokens } from '../lib/util'
 import { summarizePlan, runSummary } from '../lib/summarize'
-import Dropdown from '../components/Dropdown'
 
 const QUICK_CHIPS = ['（请继续）', '（时间推进到次日）', '（切换场景）']
 
@@ -47,8 +46,11 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
   const scrollRef = useRef(null)
   const abortRef = useRef(null)            // 进行中的流式请求，用于「停止」
   const busy = streaming !== null
-  // 本故事参数覆盖：session.params 里填了的字段盖过全局设置，没填的跟随全局
-  const eff = effectiveSettings(settings, session?.params)
+  // 本故事参数覆盖：session.params 里填了的字段盖过全局设置，没填的跟随全局。
+  // 模型/厂商已从会话参数中移除（用户决定：全局唯一入口在「设置 → AI 模型」），
+  // 历史会话 params 里残留的 providerId/model 在读取时剥离，避免旧覆盖值钉死模型。
+  const { providerId: _legacyProviderId, model: _legacyModel, ...paramOverrides } = session?.params || {}
+  const eff = effectiveSettings(settings, paramOverrides)
   // 导演指令状态（老会话无 director 字段 → 读侧兜底为「启用 + 空列表」）
   const director = session?.director || { enabled: true, notes: [] }
   const directorOn = director.enabled !== false && director.notes.some((n) => String(n?.text || '').trim())
@@ -408,10 +410,6 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     refreshSession()
   }
 
-  // ⚙ 弹层的模型下拉数据：会话覆盖的厂商 →（无覆盖时）全局厂商
-  const paramProvider = getProvider(settings, session?.params?.providerId || settings.providerId)
-  const paramModels = paramProvider?.models || []
-
   return (
     <div className="chat">
       <header className="chat-head">
@@ -604,34 +602,8 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
         <div className="modal-mask" onClick={() => setShowParams(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>本故事参数</h3>
-            <p className="muted small">留空即跟随「设置」页的全局值，只影响当前故事。</p>
+            <p className="muted small">留空即跟随「设置」页的全局值，只影响当前故事。模型与厂商请在「设置 → AI 模型」中更改。</p>
             <div className="field-grid">
-              <label>提供商
-                <Dropdown
-                  value={session?.params?.providerId ?? ''}
-                  onChange={(v) => { setParam('providerId', v); setParam('model', '') }}
-                  options={[
-                    { value: '', label: `跟随全局（${getProvider(settings, settings.providerId)?.displayName || settings.providerId}）` },
-                    ...allProviders(settings).map((p) => ({
-                      value: p.id,
-                      label: p.displayName + (p.noKey && !p.displayName.includes('本机') ? '（本机）' : ''),
-                    })),
-                  ]}
-                />
-              </label>
-              <label>模型
-                <Dropdown
-                  value={session?.params?.model ?? ''}
-                  onChange={(v) => setParam('model', v)}
-                  options={[
-                    { value: '', label: `跟随全局（${paramProvider?.id === settings.providerId ? settings.model : paramProvider?.defaultModel || ''}）` },
-                    ...(session?.params?.model && !paramModels.includes(session.params.model)
-                      ? [{ value: session.params.model, label: `${session.params.model}（当前值）` }]
-                      : []),
-                    ...paramModels.map((m) => ({ value: m, label: m })),
-                  ]}
-                />
-              </label>
               <label>温度
                 <input className="input" type="number" step="0.05" min="0" max="2" value={numOrEmpty(session?.params?.temperature)} placeholder={String(settings.temperature)}
                   onChange={(e) => setParam('temperature', numInput(e.target.value))} />
