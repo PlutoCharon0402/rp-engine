@@ -68,9 +68,11 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .input.mono { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
 
 /* ---------- 自定义下拉（B6：替代原生 select，系统菜单白底与主题脱节） ---------- */
-.dropdown { position: relative; }
-.dropdown-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; text-align: left; resize: none; white-space: nowrap; }
-.dropdown-value { overflow: hidden; text-overflow: ellipsis; }
+/* min-width:0 链条：grid 1fr 轨道 / flex 子项默认 min-width:auto，长文本会撑宽
+   整个表单导致页面横向滚动——逐层归零让宽度始终跟随容器，超长文本在 value 内省略号截断 */
+.dropdown { position: relative; min-width: 0; }
+.dropdown-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; width: 100%; cursor: pointer; text-align: left; resize: none; }
+.dropdown-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dropdown-value.is-placeholder { color: var(--muted); }
 .dropdown-arrow { flex-shrink: 0; color: var(--muted); font-size: 12px; transition: transform .15s ease; }
 .dropdown-arrow.is-open { transform: rotate(180deg); }

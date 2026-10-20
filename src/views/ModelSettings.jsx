@@ -35,6 +35,11 @@ export default function ModelSettings({ settings, onChange }) {
       next.providerId = p.id
       next.model = p.defaultModel || p.models[0] || ''
     }
+    // 该厂商就是当前对话默认时，「对话默认模型」跟随其默认模型——
+    // 否则会出现两处「默认」显示不一致（用户在编辑弹层设了 A，下面区块还是旧值 B）
+    if (settings.providerId === p.id) {
+      next.model = p.defaultModel || p.models[0] || ''
+    }
     onChange(next)
     setEditing(null)
     setTest(null)
@@ -275,7 +280,7 @@ export default function ModelSettings({ settings, onChange }) {
                   onChange={(e) => setEditing({ ...editing, models: parseModels(e.target.value) })}
                 />
               </label>
-              <label>默认模型
+              <label>默认模型（该厂商设为对话默认时用）
                 <Dropdown
                   value={editing.defaultModel}
                   onChange={(v) => setEditing({ ...editing, defaultModel: v })}
