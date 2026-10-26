@@ -7,6 +7,7 @@ import { hasAnyProviderReady } from '../lib/providers/registry'
 import { resolveCard, CARD_SOURCE_LABEL } from '../lib/cardRef'
 import { effectiveSettings, fmtTokens } from '../lib/util'
 import { summarizePlan, runSummary } from '../lib/summarize'
+import { pushBackHandler } from '../lib/backRouter'
 
 const QUICK_CHIPS = ['（请继续）', '（时间推进到次日）', '（切换场景）']
 
@@ -53,7 +54,8 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
   const eff = effectiveSettings(settings, paramOverrides)
   // 导演指令状态（老会话无 director 字段 → 读侧兜底为「启用 + 空列表」）
   const director = session?.director || { enabled: true, notes: [] }
-  const directorOn = director.enabled !== false && director.notes.some((n) => String(n?.text || '').trim())
+  const activeDirNotes = (director.notes || []).filter((n) => String(n?.text || '').trim())
+  const directorOn = director.enabled !== false && activeDirNotes.length > 0
 
   useEffect(() => {
     (async () => {
@@ -78,6 +80,19 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
 
+  // P0：返回键优先关弹层（导演弹层关闭时顺带保存草稿），而不是退出会话——
+  // 否则编辑到一半按返回键，导演指令会被整包丢弃（实测「时灵时不灵」的主因）
+  useEffect(() => {
+    return pushBackHandler(() => {
+      if (dirDraft) { closeDirector(); return true }
+      if (editText !== null) { setEditText(null); return true }
+      if (menu) { closeMenu(); return true }
+      if (showParams) { setShowParams(false); return true }
+      return false
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirDraft, editText, menu, showParams])
+
   async function refreshSession() {
     const s = await db.sessions.get(sessionId)
     setSession(s)
@@ -88,21 +103,31 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
 
   /** 打开弹层：以库内数据为草稿起点 */
   function openDirector() {
-    setDirDraft({ enabled: director.enabled !== false, notes: director.notes.map((n) => ({ ...n })), newText: '' })
+    setDirDraft({ enabled: director.enabled !== false, notes: (director.notes || []).map((n) => ({ ...n })), newText: '' })
   }
 
-  /** 关闭弹层：草稿统一写库（编辑过程中不落盘，避免每键一次 IndexedDB 写入） */
+  /** 草稿 → 库（清洗：trim、丢空条、newText 并入）。P1：每次增删改/失焦即调用，防任何路径丢草稿 */
+  async function persistDirector(draft) {
+    if (!draft || !sessionId) return
+    const notes = draft.notes
+      .map((n) => ({ id: n.id, text: String(n.text || '').trim(), createdAt: n.createdAt }))
+      .filter((n) => n.text)
+    const add = String(draft.newText || '').trim()
+    if (add) notes.push({ id: newDirId(), text: add, createdAt: Date.now() })
+    await db.sessions.update(sessionId, { director: { enabled: draft.enabled !== false, notes }, updatedAt: Date.now() })
+    refreshSession()
+  }
+
+  /** 关闭弹层：兜底落盘（正常路径下增删改已各自落库，这里防漏） */
   async function closeDirector() {
-    if (dirDraft) {
-      const notes = dirDraft.notes
-        .map((n) => ({ id: n.id, text: String(n.text || '').trim(), createdAt: n.createdAt }))
-        .filter((n) => n.text)
-      const add = String(dirDraft.newText || '').trim()
-      if (add) notes.push({ id: newDirId(), text: add, createdAt: Date.now() })
-      await db.sessions.update(sessionId, { director: { enabled: dirDraft.enabled !== false, notes }, updatedAt: Date.now() })
-      refreshSession()
-    }
+    if (dirDraft) await persistDirector(dirDraft)
     setDirDraft(null)
+  }
+
+  /** 更新草稿并立即落盘（开关 / 添加 / 删除用；输入框在失焦时落盘，避免每键一次写入） */
+  function updateDir(next) {
+    setDirDraft(next)
+    persistDirector(next)
   }
 
   /** 累计本次生成的 token 到会话（modify 函数内自增，避免读改写竞态）。
@@ -424,7 +449,13 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
           {cardSource === 'missing' && <span className="badge err">{CARD_SOURCE_LABEL.missing}</span>}
         </div>
         <div className="head-actions">
-          <button className={`icon-btn ${directorOn ? 'is-on' : ''}`} title="导演指令" onClick={() => openDirector()}>🎬</button>
+          <button
+            className={`icon-btn ${directorOn ? 'is-on' : ''}`}
+            title={directorOn ? `导演指令（${activeDirNotes.length} 条生效中）` : '导演指令'}
+            onClick={() => openDirector()}
+          >
+            🎬{directorOn ? <span className="dir-count">{activeDirNotes.length}</span> : null}
+          </button>
           <button className="icon-btn" title="本故事参数" onClick={() => setShowParams(true)}>⚙</button>
           {busy ? (
             <button className="btn small danger-text" onClick={stopStreaming}>停止</button>
@@ -543,13 +574,13 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>导演指令</h3>
             <p className="muted small">
-              写给扮演者的执导要求——怎么演、文风怎么改。AI 会遵循，但不会把它当剧情内容。关闭弹层时保存，下一回合生效。
+              写给扮演者的执导要求——怎么演、文风怎么改。AI 会遵循，但不会把它当剧情内容。增删改后自动保存，下一回合生效。
             </p>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '8px 0' }}>
               <input
                 type="checkbox"
                 checked={dirDraft.enabled !== false}
-                onChange={(e) => setDirDraft({ ...dirDraft, enabled: e.target.checked })}
+                onChange={(e) => updateDir({ ...dirDraft, enabled: e.target.checked })}
               />
               启用（停用时保留内容，只是不再注入）
             </label>
@@ -558,10 +589,11 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
                 <textarea
                   className="input" rows={2} value={n.text}
                   onChange={(e) => setDirDraft({ ...dirDraft, notes: dirDraft.notes.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
+                  onBlur={() => persistDirector(dirDraft)}
                 />
                 <button
                   className="btn small danger-text" style={{ flexShrink: 0 }}
-                  onClick={() => setDirDraft({ ...dirDraft, notes: dirDraft.notes.filter((_, j) => j !== i) })}
+                  onClick={() => updateDir({ ...dirDraft, notes: dirDraft.notes.filter((_, j) => j !== i) })}
                 >删</button>
               </div>
             ))}
@@ -573,7 +605,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && e.target.value.trim()) {
                     e.preventDefault()
-                    setDirDraft({ ...dirDraft, notes: [...dirDraft.notes, { id: newDirId(), text: e.target.value.trim(), createdAt: Date.now() }], newText: '' })
+                    updateDir({ ...dirDraft, notes: [...dirDraft.notes, { id: newDirId(), text: e.target.value.trim(), createdAt: Date.now() }], newText: '' })
                   }
                 }}
               />
@@ -582,7 +614,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
                 onClick={() => {
                   const t = String(dirDraft.newText || '').trim()
                   if (!t) return
-                  setDirDraft({ ...dirDraft, notes: [...dirDraft.notes, { id: newDirId(), text: t, createdAt: Date.now() }], newText: '' })
+                  updateDir({ ...dirDraft, notes: [...dirDraft.notes, { id: newDirId(), text: t, createdAt: Date.now() }], newText: '' })
                 }}
               >添加</button>
             </div>

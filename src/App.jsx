@@ -3,6 +3,7 @@ import { loadSettings, saveSettings } from './lib/util'
 import { db } from './lib/db'
 import { processPendingTasks, pendingSessionIds } from './lib/extractor'
 import { hasAnyProviderReady } from './lib/providers/registry'
+import { consumeBack } from './lib/backRouter'
 import { Capacitor } from '@capacitor/core'
 import ChatView from './views/ChatView'
 import SessionsView from './views/SessionsView'
@@ -45,6 +46,8 @@ export default function App() {
         const { App: NativeApp } = await import('@capacitor/app')
         importApp = NativeApp
         importApp.addListener('backButton', () => {
+          // P0：弹层优先消费返回键（如导演指令弹层关闭并保存），不触发退会话
+          if (consumeBack()) return
           if (sessionId) {
             selectSession(null)
           } else {

@@ -59,6 +59,7 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 }
 .icon-btn.danger { color: var(--danger); }
 .icon-btn.is-on { color: var(--gold); } /* 导演指令在场（启用且有内容）时的状态标记 */
+.icon-btn .dir-count { margin-left: 1px; font-size: 10px; font-weight: 600; vertical-align: super; } /* 🎬 旁的生效条数 */
 .input {
   width: 100%; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
   background: var(--panel); color: var(--text); font-size: 15px; font-family: inherit;

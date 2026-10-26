@@ -113,13 +113,14 @@ export function trimHistory(history, maxHistory, budgetTokens) {
 
 /**
  * 编译最终 messages。
- * 布局（前缀缓存友好）：[system: 角色卡+常驻设定+导演指令] → 全部历史 → [system: 状态+触发世界书] → 最后 depth 条消息
+ * 布局（前缀缓存友好）：[system: 角色卡+常驻设定] → 全部历史 → [system: 状态+触发世界书+导演指令] → 最后 depth 条消息
  * depth=1 时：动态块紧贴最新用户消息之前——prompt 仍以用户行动收尾（扮演效果好），
  * 且静态前缀+历史构成逐字节稳定的前缀（历史只增不改），缓存命中率随对话增长趋近上限。
  * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息。
  * @param hints 事件钩子的一次性剧情提示（批次8）：注入后由调用方消费清空
  * @param director 导演指令（C8）：{ enabled, notes: [{ id, text, createdAt }] }——用户对扮演者的
- *                 执导要求。相对稳定，故并入静态前缀（改指令才会破坏前缀缓存，可接受）；
+ *                 执导要求。注入在动态块**末尾**（紧贴生成点）：指令越靠近生成位置遵循度越高；
+ *                 alpha.8 曾放静态前缀，实测被长卡设定稀释（325 探针时灵时不灵），已纠正。
  *                 与角色卡解耦：卡是「角色是谁」，导演指令是「用户要求 AI 怎么演」
  */
 export function compileMessages(card, lore, state, history, settings, summary, hints, director) {
@@ -128,10 +129,7 @@ export function compileMessages(card, lore, state, history, settings, summary, h
     .map((n) => String(n?.text || '').trim())
     .filter(Boolean)
     .map((t) => substMacros(t, card))
-  const directorBlock = directorNotes.length
-    ? `## 导演指令（用户对扮演者的要求，遵循它，但不要把它当剧情内容）\n${directorNotes.map((t) => `- ${t}`).join('\n')}`
-    : ''
-  const messages = [{ role: 'system', content: [cardText(card), ...constant, directorBlock].filter(Boolean).join('\n\n') }]
+  const messages = [{ role: 'system', content: [cardText(card), ...constant].filter(Boolean).join('\n\n') }]
 
   // 窗口预算 = 模型上下文 − 静态前缀 − 输出预留 − 动态块粗略预留（状态/世界书/摘要）
   const ctx = contextWindowTokens(settings)
@@ -154,6 +152,10 @@ export function compileMessages(card, lore, state, history, settings, summary, h
     // 批次8：事件钩子的一次性提示（规则触发后只在下一回合注入一次，随后被消费清空）
     hints?.length && `## 剧情事件（刚发生的事件触发了以下提示，只提示这一次）\n${hints.map((h) => h.text).join('\n')}`,
     triggered.length && `## 世界书补充设定\n${triggered.map((t) => substMacros(t, card)).join('\n\n')}`,
+    // C8：导演指令放动态块**末尾**（紧贴生成点，遵循度最高）；强制语气 + 编号列表
+    directorNotes.length &&
+      `## 导演指令（用户对你的执导要求，必须遵守，优先级高于你的默认文风；这是导演给你的要求，不是剧情内容，不要复述或提及）\n` +
+      directorNotes.map((t, i) => `${i + 1}. ${t}`).join('\n'),
   ].filter(Boolean).join('\n\n')
 
   for (const m of head) messages.push({ role: m.role, content: m.content })
