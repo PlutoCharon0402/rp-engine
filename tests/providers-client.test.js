@@ -65,12 +65,19 @@ beforeEach(() => { resetBreakers() })
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('CL1 · 流式', () => {
-  it('成功：delta + 归一化 usage 事件', async () => {
+  it('成功：delta + 归一化 usage 事件 + finish（alpha.13 透传 finish_reason）', async () => {
     seqFetch([streamRes([delta('你'), delta('好'), sse({ choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 2, prompt_cache_hit_tokens: 8 } }), 'data: [DONE]\n\n'])])
     const evs = await drain(client().stream({ purpose: 'chat', messages: [{ role: 'user', content: 'hi' }], params: {} }))
-    expect(evs.map((e) => e.type)).toEqual(['delta', 'delta', 'usage'])
+    expect(evs.map((e) => e.type)).toEqual(['delta', 'delta', 'usage', 'finish'])
     expect(evs[0].text).toBe('你')
     expect(evs[2].usage).toMatchObject({ inputTokens: 10, cacheRead: 8 })
+  })
+
+  it('alpha.13：finish_reason=length（撞 maxTokens 截断）原样透传，业务层据此提示', async () => {
+    seqFetch([streamRes([delta('被切'), sse({ choices: [{ delta: {}, finish_reason: 'length' }], usage: { prompt_tokens: 5, completion_tokens: 2 } }), 'data: [DONE]\n\n'])])
+    const evs = await drain(client().stream({ purpose: 'chat', messages: [{ role: 'user', content: 'hi' }], params: {} }))
+    const fin = evs.find((e) => e.type === 'finish')
+    expect(fin?.reason).toBe('length')
   })
 
   it('降级：主厂商 500（重试 1 次仍失败）→ 自动切到备用厂商并成功', async () => {

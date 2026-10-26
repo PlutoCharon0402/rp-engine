@@ -113,10 +113,12 @@ export function trimHistory(history, maxHistory, budgetTokens) {
 
 /**
  * 编译最终 messages。
- * 布局（前缀缓存友好）：[system: 角色卡+常驻设定] → 全部历史 → [system: 状态+触发世界书+导演指令] → 最后 depth 条消息
- * depth=1 时：动态块紧贴最新用户消息之前——prompt 仍以用户行动收尾（扮演效果好），
- * 且静态前缀+历史构成逐字节稳定的前缀（历史只增不改），缓存命中率随对话增长趋近上限。
- * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息。
+ * 布局（前缀缓存友好）：[system: 角色卡+常驻设定] → 全部历史 →
+ *   [system: 状态+触发世界书+导演指令] → 最后 depth 条消息 → [system: 导演指令最终提醒]
+ * depth=1 时：动态块紧贴最新用户消息之前；alpha.13 起在绝对末尾追加导演指令紧凑重述
+ *（flash/pro 档对末尾指令的遵循度最高，详见该处注释）。
+ * 静态前缀+历史构成逐字节稳定的前缀（历史只增不改），缓存命中率随对话增长趋近上限。
+ * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息 + 最终提醒。
  * @param hints 事件钩子的一次性剧情提示（批次8）：注入后由调用方消费清空
  * @param director 导演指令（C8）：{ enabled, notes: [{ id, text, createdAt }] }——用户对扮演者的
  *                 执导要求。注入在动态块**末尾**（紧贴生成点）：指令越靠近生成位置遵循度越高；
@@ -161,5 +163,17 @@ export function compileMessages(card, lore, state, history, settings, summary, h
   for (const m of head) messages.push({ role: m.role, content: m.content })
   if (dyn.trim()) messages.push({ role: 'system', content: dyn })
   for (const m of tail) messages.push({ role: m.role, content: m.content })
+
+  // alpha.13：prompt 绝对末尾再追加一次导演指令（紧凑重述）。
+  // 弱指令模型（flash 档）对 prompt 末尾内容的遵循度压倒前文——用户最后一条
+  // 消息才是模型读到的"最后一句"，埋在动态块里的指令会被压过。业界同款做法
+  //（SillyTavern post-history instructions）。与动态块里的完整版是刻意重复：
+  // 两个注入位置 + 复述，专门为 flash/pro 档提权。语义标注「不属于剧情」防复述。
+  if (directorNotes.length) {
+    messages.push({
+      role: 'system',
+      content: `【导演指令·最终提醒，必须执行，优先级最高；不属于剧情内容，不要提及】\n${directorNotes.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n现在生成你的回复。`,
+    })
+  }
   return messages
 }

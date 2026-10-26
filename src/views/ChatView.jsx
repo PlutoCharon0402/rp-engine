@@ -214,14 +214,21 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary, session?.pendingHints, session?.director)
       // 续写：以指令消息收尾让模型顺着最后一段继续；指令不落库，不污染历史
       if (opts.instruction) compiled.push({ role: 'user', content: opts.instruction })
+      let finishReason = null
       for await (const delta of api.stream(compiled, {
         signal: controller.signal,
         onUsage: (u) => { setUsage(u); addUsage(u) },
+        onFinish: (reason) => { finishReason = reason },
       })) {
         acc += delta
         setStreaming(acc)
       }
       setStreaming(null)
+      // alpha.13：撞 maxTokens 被截断时明确提示——此前该信号被静默丢弃，
+      // 回复末尾内容（如导演探针）被切掉却无任何解释
+      if (finishReason === 'length') {
+        setNotice(`⚠ 这条回复被「最大生成长度」截断了，末尾内容丢失。当前上限 ${eff.maxTokens}，可在 ⚙ 本故事参数或「设置」页调大。`)
+      }
       const lastUser = [...history].reverse().find((m) => m.role === 'user')
       // 批次9：新消息接在当前时间线末尾之后（parent 链），落库后活动指针前移
       const parentId = history.length ? history[history.length - 1].id : null
@@ -575,6 +582,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
             <h3>导演指令</h3>
             <p className="muted small">
               写给扮演者的执导要求——怎么演、文风怎么改。AI 会遵循，但不会把它当剧情内容。增删改后自动保存，下一回合生效。
+              测试是否生效用命令句（如「每条回复末尾必须输出 325」），不要用「如果…就…」条件句——弱模型判断不了前提。
             </p>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: '8px 0' }}>
               <input
@@ -600,7 +608,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
             <div className="row">
               <input
                 className="input" value={dirDraft.newText}
-                placeholder="例：文风再冷一点，少用感叹号"
+                placeholder="例：文风再冷一点，少用感叹号。测试指令用命令句：每条回复末尾必须输出 325"
                 onChange={(e) => setDirDraft({ ...dirDraft, newText: e.target.value })}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && e.target.value.trim()) {
@@ -643,6 +651,9 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
               <label>最大生成长度
                 <input className="input" type="number" min="1" value={numOrEmpty(session?.params?.maxTokens)} placeholder={String(settings.maxTokens)}
                   onChange={(e) => setParam('maxTokens', numInput(e.target.value))} />
+                {session?.params?.maxTokens !== '' && session?.params?.maxTokens != null && (
+                  <span className="muted">已覆盖全局（{settings.maxTokens}）——改「设置」页不会影响本故事，清空本框即跟随全局。推理模型建议 4096+。</span>
+                )}
               </label>
               <label>注入深度
                 <input className="input" type="number" min="0" max="20" value={numOrEmpty(session?.params?.depth)} placeholder={String(settings.depth)}

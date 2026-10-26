@@ -31,11 +31,16 @@ export function makeApi(settings) {
   })
 
   return {
-    /** 流式对话：yield 增量文本；onUsage 收归一化用量；全部厂商失败时抛 ProviderError */
+    /**
+     * 流式对话：yield 增量文本；onUsage 收归一化用量；全部厂商失败时抛 ProviderError。
+     * opts.onFinish(reason)：生成结束原因——'length' = 撞 maxTokens 被截断
+     *（此前该信号被静默丢弃，截断的回复末尾消失却无提示，alpha.13 透传）。
+     */
     async *stream(messages, opts = {}) {
       for await (const ev of client.stream(toReq(messages, opts, 'chat'))) {
         if (ev.type === 'delta') yield ev.text
         else if (ev.type === 'usage' && opts.onUsage) opts.onUsage(ev.usage)
+        else if (ev.type === 'finish' && opts.onFinish) opts.onFinish(ev.reason)
       }
     },
 

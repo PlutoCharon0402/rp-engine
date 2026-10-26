@@ -79,6 +79,10 @@ async function* attemptStream(target, req, sleep) {
       const tail = adapter.endOfStream(state)
       const usage = tail.find((e) => e.type === 'usage')?.usage || null
       if (usage) yield { type: 'usage', usage }
+      // alpha.13：透传 finish_reason（如 'length' = 撞 maxTokens 被截断）——
+      // 此前被静默丢弃，截断的回复末尾内容（如导演探针）消失却无任何提示
+      const fin = tail.find((e) => e.type === 'finish')
+      if (fin) yield { type: 'finish', reason: fin.reason }
       return { usage, ttftMs, totalMs: Date.now() - t0 }
     } catch (e) {
       const err = fromFetchError(e, target.provider.id)
@@ -135,6 +139,8 @@ export function createChatClient(settings, inj = {}) {
             } else if (ev.type === 'usage') {
               usage = ev.usage
               yield ev
+            } else if (ev.type === 'finish') {
+              yield ev // alpha.13：finish_reason 透传给业务层（截断提示用）
             }
           }
           breakerRecord(t.provider.id, true)
