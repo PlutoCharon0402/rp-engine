@@ -114,18 +114,19 @@ export function trimHistory(history, maxHistory, budgetTokens) {
 /**
  * 编译最终 messages。
  * 布局（前缀缓存友好）：[system: 角色卡+常驻设定] → 全部历史 →
- *   [system: 状态+触发世界书+导演指令] → 最后 depth 条消息 → [system: 导演指令最终提醒]
- * depth=1 时：动态块紧贴最新用户消息之前；alpha.13 起在绝对末尾追加导演指令紧凑重述
- *（flash/pro 档对末尾指令的遵循度最高，详见该处注释）。
+ *   [system: 状态+触发世界书+导演指令] → 最后 depth 条消息 → [user: 续写指令] →
+ *   末条消息后缀：导演指令最终提醒
+ * 导演指令两处刻意重复（动态块完整版 + 绝对末尾提醒，flash/pro 档遵循度）。
+ * alpha.14：末尾提醒从独立 system 消息改为**最后一条消息的后缀**——部分推理模型的
+ * chat 模板会丢弃/挪动末尾 system 消息，后缀形式保证任何模板下模型都能读到；
+ * 续写指令移入编译器（第 9 参 tailUser），保证提醒始终排在它之后（绝对末尾）。
  * 静态前缀+历史构成逐字节稳定的前缀（历史只增不改），缓存命中率随对话增长趋近上限。
- * 每轮未命中部分恒定 ≈ 上一轮新回复 + 动态块 + 新用户消息 + 最终提醒。
  * @param hints 事件钩子的一次性剧情提示（批次8）：注入后由调用方消费清空
  * @param director 导演指令（C8）：{ enabled, notes: [{ id, text, createdAt }] }——用户对扮演者的
- *                 执导要求。注入在动态块**末尾**（紧贴生成点）：指令越靠近生成位置遵循度越高；
- *                 alpha.8 曾放静态前缀，实测被长卡设定稀释（325 探针时灵时不灵），已纠正。
- *                 与角色卡解耦：卡是「角色是谁」，导演指令是「用户要求 AI 怎么演」
+ *                 执导要求。与角色卡解耦：卡是「角色是谁」，导演指令是「用户要求 AI 怎么演」
+ * @param tailUser 续写指令（不落库的收尾 user 消息，原由 ChatView 编译后自 push）
  */
-export function compileMessages(card, lore, state, history, settings, summary, hints, director) {
+export function compileMessages(card, lore, state, history, settings, summary, hints, director, tailUser) {
   const constant = (lore || []).filter((e) => e.enabled !== false && e.constant).map((e) => substMacros(e.content, card))
   const directorNotes = (director && director.enabled === false ? [] : (director?.notes || []))
     .map((n) => String(n?.text || '').trim())
@@ -164,16 +165,22 @@ export function compileMessages(card, lore, state, history, settings, summary, h
   if (dyn.trim()) messages.push({ role: 'system', content: dyn })
   for (const m of tail) messages.push({ role: m.role, content: m.content })
 
-  // alpha.13：prompt 绝对末尾再追加一次导演指令（紧凑重述）。
-  // 弱指令模型（flash 档）对 prompt 末尾内容的遵循度压倒前文——用户最后一条
-  // 消息才是模型读到的"最后一句"，埋在动态块里的指令会被压过。业界同款做法
-  //（SillyTavern post-history instructions）。与动态块里的完整版是刻意重复：
-  // 两个注入位置 + 复述，专门为 flash/pro 档提权。语义标注「不属于剧情」防复述。
+  // 续写指令（不落库）：收尾 user 消息，排在导演提醒之前
+  if (tailUser) messages.push({ role: 'user', content: tailUser })
+
+  // alpha.14：导演指令最终提醒 = 最后一条消息的**后缀**（prompt 绝对末尾）。
+  // 弱指令模型（flash 档）对 prompt 末尾内容的遵循度压倒前文；部分推理模型的
+  // chat 模板会丢弃/挪动末尾独立 system 消息，后缀形式在任何模板下都能被读到。
+  // 与动态块完整版是刻意重复（两处注入提权）。「格式放大器」一句专为
+  // 「在回复末尾输出特定内容」类指令（325 探针）补一道保险。
   if (directorNotes.length) {
-    messages.push({
-      role: 'system',
-      content: `【导演指令·最终提醒，必须执行，优先级最高；不属于剧情内容，不要提及】\n${directorNotes.map((t, i) => `${i + 1}. ${t}`).join('\n')}\n现在生成你的回复。`,
-    })
+    const reminder =
+      `〔导演指令·最终提醒：必须执行以下要求，优先级最高；这不是用户发言，不属于剧情内容，不要提及〕\n` +
+      directorNotes.map((t, i) => `${i + 1}. ${t}`).join('\n') +
+      `\n若某条指令要求在回复末尾输出特定内容，必须在正文结束后原样输出，不得省略。\n现在生成你的回复。`
+    const last = messages[messages.length - 1]
+    if (last && messages.length > 1) last.content = `${last.content}\n\n${reminder}`
+    else messages.push({ role: 'user', content: reminder })
   }
   return messages
 }

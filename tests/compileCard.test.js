@@ -175,18 +175,26 @@ describe('C4 · 导演指令（C8：用户对扮演者的执导要求）', () =>
     expect(dyn.content.indexOf('导演指令')).toBeGreaterThan(dyn.content.indexOf('世界书补充设定'))
   })
 
-  it('alpha.13：prompt 绝对末尾还有最终提醒（flash/pro 档对末尾指令遵循度最高）', () => {
+  it('alpha.14：最终提醒是最后一条消息的后缀（部分推理模型模板会丢末尾 system 消息）', () => {
     const msgs = compileMessages(card, lore, state, history, settings, null, null, director)
     const last = msgs[msgs.length - 1]
-    expect(last.role).toBe('system')
+    expect(last.role).toBe('user') // 后缀式：不再是独立 system 消息
     expect(last.content).toContain('最终提醒')
     expect(last.content).toContain('1. 文风再冷一点，少用感叹号')
+    expect(last.content).toContain('原样输出，不得省略') // 格式放大器（325 探针类指令的保险）
     expect(last.content).toContain('现在生成你的回复')
-    // 停用时末尾没有提醒
+    // 停用 / 空指令：无后缀，末尾就是原始用户消息
     const off = compileMessages(card, lore, state, history, settings, null, null, { ...director, enabled: false })
     expect(String(off[off.length - 1].content)).not.toContain('最终提醒')
-    // 空指令时末尾是用户消息（不追加任何 system），保持"以用户行动收尾"
     const none = compileMessages(card, lore, state, history, settings, null, null, { enabled: true, notes: [] })
-    expect(none[none.length - 1].role).toBe('user')
+    expect(String(none[none.length - 1].content)).not.toContain('最终提醒')
+  })
+
+  it('alpha.14：续写指令（tailUser）排在最终提醒之前，提醒仍是 prompt 绝对末尾', () => {
+    const msgs = compileMessages(card, lore, state, history, settings, null, null, director, '（继续叙事）')
+    const last = msgs[msgs.length - 1]
+    expect(last.role).toBe('user')
+    expect(last.content).toContain('（继续叙事）') // 续写指令在
+    expect(last.content.indexOf('（继续叙事）')).toBeLessThan(last.content.indexOf('最终提醒')) // 提醒排在其后（末尾）
   })
 })

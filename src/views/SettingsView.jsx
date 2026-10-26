@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { db } from '../lib/db'
-import { fmtTime } from '../lib/util'
+import { fmtTime, APP_VERSION } from '../lib/util'
 import { validateDump, importDump, buildDump, downloadDump, countDump, snapshotBackup, listBackups, restoreBackup } from '../lib/backup'
 import ModelSettings from './ModelSettings'
 import { EXTRACTOR_SYS } from '../lib/extractor'
@@ -232,6 +232,7 @@ export default function SettingsView({ settings, onChange, onDataImported }) {
       {!backups.length && <p className="muted small">暂无快照（首次导入备份时会自动创建）。</p>}
       <p className="muted small">所有数据只存在本机浏览器（IndexedDB）。各模型厂商的 API Key 仅存于本机 localStorage，浏览器直连模型服务，不经过任何第三方服务器（不支持直连的服务需自建代理）。换设备前记得导出备份。</p>
       {msg && <div className={`banner ${msg.ok ? 'info' : 'error'}`} onClick={() => setMsg(null)}>{msg.text}</div>}
+      <p className="muted small" style={{ textAlign: 'center', marginTop: 24 }}>RP Engine {APP_VERSION}（APK 版本以设置页此处为准，排查问题请先核对）</p>
     </div>
   )
 }

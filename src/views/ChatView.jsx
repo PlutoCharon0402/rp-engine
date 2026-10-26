@@ -40,6 +40,7 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('') // 非错误提示（如"已停止生成"），info 样式
   const [usage, setUsage] = useState(null) // 最近一次生成的 usage（含缓存命中）
+  const [lastPrompt, setLastPrompt] = useState(null) // 诊断快照：上一回合发送的完整 prompt
   const [menu, setMenu] = useState(null)   // 消息操作弹层：当前消息对象
   const [editText, setEditText] = useState(null) // null=非编辑态；string=正在编辑该消息
   const [showParams, setShowParams] = useState(false) // 本故事参数覆盖弹层
@@ -211,9 +212,10 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       const lore = [...(await db.lore.toArray()), ...(session?.lore || [])] // 全局 + 本故事专属
       const api = makeApi(eff)
       // 批次8：pendingHints 是事件钩子排队的一次性剧情提示，注入本回合后即被消费清空
-      const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary, session?.pendingHints, session?.director)
-      // 续写：以指令消息收尾让模型顺着最后一段继续；指令不落库，不污染历史
-      if (opts.instruction) compiled.push({ role: 'user', content: opts.instruction })
+      // alpha.14：续写指令移入编译器第 9 参（保证导演提醒排在它之后、prompt 绝对末尾）
+      const compiled = compileMessages(card, lore, session?.state, history, eff, session?.summary, session?.pendingHints, session?.director, opts.instruction)
+      // 诊断快照：上一回合实际发送的完整 prompt（⚙ 弹层「诊断」卡可查看，排查导演指令是否注入）
+      setLastPrompt(compiled.map((m) => ({ role: m.role, content: m.content })))
       let finishReason = null
       for await (const delta of api.stream(compiled, {
         signal: controller.signal,
@@ -711,6 +713,39 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
                 <div className="small muted" style={{ whiteSpace: 'pre-wrap', maxHeight: '12em', overflowY: 'auto' }}>{session.summary}</div>
               </div>
             )}
+
+            {/* alpha.14 诊断卡：上一回合实际发送的完整 prompt——排查「导演指令不生效」
+                时一眼可见：指令在里面而模型不执行 → 模型遵循度问题；不在里面 → 保存/注入问题 */}
+            <div className="card" style={{ marginTop: 12 }}>
+              <div className="card-title">
+                <b>🔍 诊断：上一回合的 prompt</b>
+                {lastPrompt && (
+                  <span className={`small ${lastPrompt.some((m) => String(m.content).includes('导演指令')) ? 'ok-text' : 'err-text'}`}>
+                    {lastPrompt.some((m) => String(m.content).includes('导演指令')) ? '✓ 导演指令已注入' : '✗ 导演指令未注入'}
+                  </span>
+                )}
+              </div>
+              {lastPrompt ? (
+                <>
+                  <p className="muted small">
+                    上一回合发给模型的完整内容（{lastPrompt.length} 条消息，从上到下即发送顺序）。
+                    「导演指令」应出现在动态块与最后一条消息的末尾两处。
+                  </p>
+                  <pre className="small muted" style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, maxHeight: '16em', overflowY: 'auto' }}>
+                    {lastPrompt.map((m, i) => `── [${i}] ${m.role.toUpperCase()} ──\n${m.content}`).join('\n\n')}
+                  </pre>
+                  <div className="row-end" style={{ marginTop: 8 }}>
+                    <button className="btn small" onClick={async () => {
+                      const text = lastPrompt.map((m) => `# ${m.role}\n${m.content}`).join('\n\n---\n\n')
+                      try { await navigator.clipboard.writeText(text); setNotice('已复制完整 prompt（可粘贴给开发者排查）') }
+                      catch { setNotice('复制失败：浏览器未授予剪贴板权限') }
+                    }}>复制完整 prompt</button>
+                  </div>
+                </>
+              ) : (
+                <p className="muted small">本会话还没有生成过回复。</p>
+              )}
+            </div>
 
             <div className="row-end">
               <button className="btn" onClick={async () => { await db.sessions.update(sessionId, { params: {} }); refreshSession() }}>全部恢复全局</button>
