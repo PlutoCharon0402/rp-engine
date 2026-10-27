@@ -197,4 +197,14 @@ describe('C4 · 导演指令（C8：用户对扮演者的执导要求）', () =>
     expect(last.content).toContain('（继续叙事）') // 续写指令在
     expect(last.content.indexOf('（继续叙事）')).toBeLessThan(last.content.indexOf('最终提醒')) // 提醒排在其后（末尾）
   })
+
+  it('回归守护：探针类指令（末尾输出固定串）同时出现在动态块与 prompt 绝对末尾', () => {
+    const probe = { enabled: true, notes: [{ id: 'p', text: '每条回复末尾必须输出 325', createdAt: 1 }] }
+    const msgs = compileMessages(card, lore, state, history, settings, null, null, probe)
+    const dyn = msgs.find((m) => m.role === 'system' && m.content.includes('导演指令'))
+    expect(dyn.content).toContain('每条回复末尾必须输出 325') // 动态块里有
+    const last = msgs[msgs.length - 1]
+    expect(last.content).toContain('每条回复末尾必须输出 325') // 末尾后缀里也有
+    expect(last.content.trim().endsWith('现在生成你的回复。')).toBe(true) // 提醒收尾
+  })
 })
