@@ -127,7 +127,7 @@ npm run apk
 
 **安装到手机**：传 APK → 允许未知来源安装 → 覆盖安装保留 IndexedDB 数据与 localStorage 的 Key（卸载才清零）。
 
-**环境依赖**：JDK 21、Android SDK (platform-34/build-tools-34)、Gradle 自动下载。
+**环境依赖**：JDK 21（Capacitor 8 工程要求）、Android SDK (platform-36，见 `android/variables.gradle`)、Gradle 8.14.3（gradlew 自动下载）。
 
 > ⚠️ **git push 注意**：本开发环境曾出现 SSH 连 GitHub 被网络层中断（`Connection closed by UNKNOWN port 65535`）。本地 `git commit` 正常；若 `git push` 失败，请确认环境出网或手动推送。
 

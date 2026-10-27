@@ -35,7 +35,7 @@ export default function App() {
 
   /**
    * Android 返回键（仅 APK / Capacitor 原生环境生效）：
-   *   在会话内 → 返回会话列表；在会话列表 → 二次确认后退出。
+   *   在会话内 → 返回会话列表；在会话列表 → 直接退出应用（暂无二次确认）。
    *   不拦截时 WebView 默认行为是直接杀掉应用，会丢失"进行中的生成"。
    */
   useEffect(() => {

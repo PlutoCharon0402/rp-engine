@@ -1,6 +1,8 @@
 # Android Alpha 版本发布说明
 
-## 当前版本：0.5.0-alpha.1（versionCode 1）
+## 当前版本：0.5.0-alpha.14（versionCode 14）
+
+> 本文档记录发布流程与版本规则；实际版本号以 `android/app/build.gradle` 和设置页页脚为准，发版前务必核对。
 
 ## 构建方法
 
@@ -21,12 +23,12 @@ npm run apk
 
 | 项 | 位置 | 规则 |
 |---|---|---|
-| `versionName` | `android/app/build.gradle` | 跟随 package.json + alpha 后缀，如 `0.5.0-alpha.1` |
+| `versionName` | `android/app/build.gradle` | 跟随 package.json + alpha 后缀，如 `0.5.0-alpha.14` |
 | `versionCode` | `android/app/build.gradle` | 从 1 起每次构建 **+1**，忘了递增会被 Android 拒绝覆盖安装 |
 
 ## 安装到手机
 
-1. 把 `RP-Engine-0.5.0-alpha.1.apk` 传到手机（微信文件传输 / USB / 网盘均可）
+1. 把 `RP-Engine-0.5.0-alpha.N.apk` 传到手机（微信文件传输 / USB / 网盘均可）
 2. 点开 APK → 系统提示"不允许安装未知应用" → 去设置允许当前来源安装
 3. 装完桌面出现「RP Engine」图标
 
@@ -45,9 +47,9 @@ npm run apk
 
 ## 环境依赖（本机已就绪）
 
-- JDK 21（Temurin）
-- Android SDK：platform-tools + platforms;android-34 + build-tools;34.0.0（`~/Library/Android/sdk`，命令行安装，无需 Android Studio）
-- Gradle 8.14（gradlew 自动下载）
+- JDK 21（Capacitor 8 的 Android 工程要求；Temurin 可用）
+- Android SDK：platform-tools + platforms;android-36（`~/Library/Android/sdk`，命令行安装，无需 Android Studio；compile/target 实际值见 `android/variables.gradle`）
+- Gradle 8.14.3（gradlew 自动下载）
 
 ## 故障排查
 
