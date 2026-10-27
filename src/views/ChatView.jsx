@@ -8,6 +8,7 @@ import { resolveCard, CARD_SOURCE_LABEL } from '../lib/cardRef'
 import { effectiveSettings, fmtTokens } from '../lib/util'
 import { summarizePlan, runSummary } from '../lib/summarize'
 import { pushBackHandler } from '../lib/backRouter'
+import { buildProbeDirector, evaluateProbeResult, PROBE_TOKEN } from '../lib/selfCheck'
 
 const QUICK_CHIPS = ['（请继续）', '（时间推进到次日）', '（切换场景）']
 
@@ -45,9 +46,12 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
   const [editText, setEditText] = useState(null) // null=非编辑态；string=正在编辑该消息
   const [showParams, setShowParams] = useState(false) // 本故事参数覆盖弹层
   const [dirDraft, setDirDraft] = useState(null)      // C8：导演指令弹层的本地草稿（null=关闭）；关闭时统一写库
+  const [probing, setProbing] = useState(false)       // 导演遵循自检进行中
+  const [probeResult, setProbeResult] = useState(null) // 自检结果（pass/truncated/fail/error/aborted）
   const scrollRef = useRef(null)
   const abortRef = useRef(null)            // 进行中的流式请求，用于「停止」
-  const busy = streaming !== null
+  const probeAbortRef = useRef(null)       // 自检的独立中断器（与正式生成互不干扰）
+  const busy = streaming !== null || probing
   // 本故事参数覆盖：session.params 里填了的字段盖过全局设置，没填的跟随全局。
   // 模型/厂商已从会话参数中移除（用户决定：全局唯一入口在「设置 → AI 模型」），
   // 历史会话 params 里残留的 providerId/model 在读取时剥离，避免旧覆盖值钉死模型。
@@ -68,12 +72,13 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
       setCardSource(source)
       setMessages(await getTimeline(sessionId))
       setError('')
+      setProbeResult(null)
       // 补跑上次未完成的状态提取
       const pending = (await db.tasks.where('sessionId').equals(sessionId).toArray()).filter((t) => t.status === 'pending')
       if (pending.length) kickExtraction(null, null, true)
     })()
-    // 离开会话时中断仍在进行的生成：已生成的部分会被落库，不留"永远收不到回复"的孤儿请求
-    return () => { abortRef.current?.abort() }
+    // 离开会话时中断仍在进行的生成与自检：已生成的部分会被落库，不留"永远收不到回复"的孤儿请求
+    return () => { abortRef.current?.abort(); probeAbortRef.current?.abort() }
   }, [sessionId])
 
   useEffect(() => {
@@ -178,9 +183,60 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
     })()
   }
 
-  /** 停止当前生成：abort 会让 stream 的 fetch 抛 AbortError，由 streamReply 的 catch 收尾 */
+  /** 停止当前生成 / 自检：abort 会让 stream 的 fetch 抛 AbortError，由对应 catch 收尾 */
   function stopStreaming() {
     abortRef.current?.abort()
+    probeAbortRef.current?.abort()
+  }
+
+  /**
+   * 导演遵循自检（alpha-feedback §6.3）：把探针指令临时追加到当前导演指令后发一次请求，
+   * 机械判定模型是否真的在回复末尾输出 325。
+   * 刻意不落库、不消费 pendingHints、不写世界状态、不计入会话用量——这是一次性诊断，
+   * 不能污染故事本身。结果只在弹层内展示。
+   */
+  async function runDirectorSelfCheck() {
+    if (busy) return
+    if (!hasAnyProviderReady(settings)) {
+      setProbeResult({ status: 'error', detail: '尚未配置任何模型的 API Key，无法自检。请到「设置」页完成配置。' })
+      return
+    }
+    if (cardSource === 'missing') {
+      setProbeResult({ status: 'error', detail: CARD_SOURCE_LABEL.missing })
+      return
+    }
+    const controller = new AbortController()
+    probeAbortRef.current = controller
+    setProbing(true)
+    setProbeResult(null)
+    let acc = ''
+    try {
+      const lore = [...(await db.lore.toArray()), ...(session?.lore || [])]
+      const api = makeApi(eff)
+      const compiled = compileMessages(
+        card, lore, session?.state, messages, eff,
+        session?.summary, session?.pendingHints, buildProbeDirector(director),
+      )
+      let finishReason = null
+      let usage = null
+      for await (const delta of api.stream(compiled, {
+        signal: controller.signal,
+        onUsage: (u) => { usage = u },
+        onFinish: (reason) => { finishReason = reason },
+      })) {
+        acc += delta
+      }
+      setProbeResult(evaluateProbeResult({ text: acc, finishReason, usage }))
+    } catch (e) {
+      if (e?.name === 'AbortError') {
+        setProbeResult({ status: 'aborted', detail: '自检已取消。' })
+      } else {
+        setProbeResult({ status: 'error', detail: `自检失败：${String(e?.message || e)}` })
+      }
+    } finally {
+      setProbing(false)
+      if (probeAbortRef.current === controller) probeAbortRef.current = null
+    }
   }
 
   /**
@@ -632,6 +688,42 @@ export default function ChatView({ sessionId, settings, onExit, onSessionUpdate,
               {dirDraft.notes.length} 条 · 约 {dirDraft.notes.reduce((a, n) => a + String(n.text || '').length, 0)} 字
               {dirDraft.enabled === false ? ' · 已停用' : ''}
             </p>
+
+            {/* 遵循自检（alpha-feedback §6.3）：一键发探针，把验收从「用户肉眼找 325」变成「按钮出结论」 */}
+            <div className="card" style={{ marginTop: 12 }}>
+              <div className="card-title"><b>遵循自检</b></div>
+              <p className="muted small">
+                向当前模型发一次探针指令（要求回复末尾输出 {PROBE_TOKEN}），自动判定导演指令是否真的被执行。
+                自检结果不会写进对话历史，也不影响世界状态与用量统计。
+              </p>
+              <div className="row">
+                <button className="btn" disabled={busy} onClick={runDirectorSelfCheck}>
+                  {probing ? '自检中…' : '运行自检'}
+                </button>
+                {probing && <button className="btn danger-text" onClick={stopStreaming}>取消</button>}
+              </div>
+              {probeResult && (
+                <div
+                  className={`banner ${probeResult.status === 'pass' ? 'info' : probeResult.status === 'truncated' || probeResult.status === 'aborted' ? 'warn' : 'error'}`}
+                  style={{ marginTop: 8 }}
+                  onClick={() => setProbeResult(null)}
+                >
+                  {probeResult.detail}
+                  {probeResult.tail && (
+                    <pre className="small muted" style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12, maxHeight: '8em', overflowY: 'auto' }}>
+                      …{probeResult.tail}
+                    </pre>
+                  )}
+                  {probeResult.usage && (
+                    <p className="muted small" style={{ margin: '6px 0 0' }}>
+                      本次自检消耗 {fmtTokens((Number(probeResult.usage.inputTokens) || 0) + (Number(probeResult.usage.outputTokens) || 0))} tokens
+                      {probeResult.finishReason === 'length' ? ' · 已被最大生成长度截断' : ''}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="row-end">
               <button className="btn" onClick={closeDirector}>关闭</button>
             </div>

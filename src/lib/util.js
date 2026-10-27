@@ -1,7 +1,7 @@
 import { migrateSettings } from './providers/registry'
 
 /** 应用版本（与 android/app/build.gradle 的 versionName 保持同步；排查问题时确认装机版本用） */
-export const APP_VERSION = '0.5.0-alpha.14'
+export const APP_VERSION = '0.5.0-alpha.15'
 
 export const DEFAULT_SETTINGS = {
   endpoint: 'https://api.deepseek.com/v1',   // 老字段：迁移源（migrateSettings 据此包装 providers），UI 不再直接编辑

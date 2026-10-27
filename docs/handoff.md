@@ -11,8 +11,8 @@
 
 - 用户导入角色卡，与 AI 进行沉浸式 RP 对话；用户可像「导演」一样对扮演者下执导指令（文风、剧情走向等）。
 - **无后端**：纯前端 + IndexedDB 本地存储，用户自己填模型 API Key，浏览器/WebView 直连模型厂商。
-- 当前阶段：**Android alpha 内测**（alpha.14），分支 `feat/android-alpha`。
-- 版本号 `0.5.0-alpha.14`（package.json 仍是 `0.5.0`，versionName 在 gradle 里带 alpha 后缀）。
+- 当前阶段：**Android alpha 内测**（alpha.15），分支 `feat/android-alpha`。
+- 版本号 `0.5.0-alpha.15`（package.json 仍是 `0.5.0`，versionName 在 gradle 里带 alpha 后缀）。
 
 **技术栈**（已核对 `package.json`）：
 - Capacitor 8 + React 18 + Vite 5 + Dexie 4（IndexedDB）
@@ -53,6 +53,7 @@ rp-engine/
 │       │       ├── openaiCompat.js   # OpenAI 兼容（DeepSeek/Qwen/GLM…）
 │       │       └── anthropic.js       # Claude
 │       ├── extractor.js        # 世界状态提取（批次7）：从回复抽 JSON
+│       ├── selfCheck.js        # 导演遵循自检（alpha.15）：探针构造 + 机械判定，纯函数
 │       ├── summarize.js        # 早期剧情摘要
 │       ├── lore.js / cardImport.js / cardRef.js
 │       ├── sessionIO.js        # 会话导入/导出（备份互转）
@@ -119,7 +120,7 @@ npm run apk
 
 **版本号规则**（发布前必改 `android/app/build.gradle`）：
 - `versionName` 跟随语义 + alpha 后缀，如 `0.5.0-alpha.15`
-- `versionCode` **每次 +1**（当前 14）。忘了递增 → Android 拒绝覆盖安装。
+- `versionCode` **每次 +1**（当前 15）。忘了递增 → Android 拒绝覆盖安装。
 
 **签名**（已在 `alpha-release.md` 详述）：
 - `android/rpengine-alpha.keystore` + `android/keystore.properties` 均 gitignored。
@@ -153,6 +154,7 @@ npm run apk
 - alpha.12 移动态块末尾 + 立即保存 + 返回键消费栈 → 解决保存/注入链路，但档位错配掩盖成效
 - alpha.13 发现 `finish_reason` 在 client 被静默丢弃（截断无信号）+ flash 需绝对末尾 → 透传 finish + 末尾 system 提醒
 - alpha.14 末尾独立 system 被推理模型 chat 模板丢弃 → 改**末尾消息后缀**；补诊断卡
+- alpha.15 验收仍靠肉眼找 `325` → 内置「遵循自检」按钮（一键探针 + 机械判定，区分通过/截断/未遵循）
 - 根因 = 档位错配 + 截断无信号 + 末尾 system 被丢。**诊断卡本该 alpha.8 就该有。**
 
 ### 5.4 探针 / 验收信号规范
@@ -172,7 +174,7 @@ npm run apk
 
 ---
 
-## 6. 当前进度（alpha.14 已完成）
+## 6. 当前进度（alpha.15 已完成）
 
 | 模块 | 状态 |
 |---|---|
@@ -186,7 +188,8 @@ npm run apk
 | prompt 末尾导演提醒（后缀式，兼容推理模型） | ✅ alpha.14 |
 | ⚙ 诊断卡（看实际 prompt） | ✅ alpha.14 |
 | 应用内版本号显示 | ✅ alpha.14 |
-| PM 规范文档 + 本地回归守护 | ✅ 本批 |
+| PM 规范文档 + 本地回归守护 | ✅ alpha.14 批次 |
+| 🎬 导演遵循自检按钮（一键探针 + 机械判定） | ✅ alpha.15（待真机验收） |
 
 ---
 
@@ -201,7 +204,9 @@ npm run apk
 
 **待决策 D1–D4**：edge-to-edge 仍无效是否允许 adb logcat；修复验收结果；合并 main 时机；外部数据防御是否独立排期。
 
-**★ 建议的下一个小任务**：`alpha-feedback.md §6.3` 提到的 **app 内置「导演遵循自检」按钮**——一键发探针并自动判定 `325` 是否出现，把验收从「用户手动看」变成「按钮点一下」。纯前端 + 现有流式链路，风险低。
+**★ 已完成（alpha.15）**：`alpha-feedback.md §6.3` 的 **app 内置「导演遵循自检」按钮**——🎬 导演弹层一键发探针并机械判定 `325` 是否收尾，区分「通过 / 被 maxTokens 截断 / 未遵循」；实现在 `src/lib/selfCheck.js`（纯函数）+ `src/views/ChatView.jsx`，单测 `tests/selfCheck.test.js`。**待真机 flash/pro 双档验收**。
+
+**★ 建议的下一个小任务**：自检的已知打磨点——① 运行前强制落盘导演弹层草稿（现在测的是已存盘版本，刚输入未失焦的指令不在内）；② 自检结果区展示本次实际发送的 prompt；③ 在 ⚙ 诊断卡加自检入口。其次是 B5（设置页移动端诊断信息）。
 
 ---
 
@@ -211,6 +216,7 @@ npm run apk
 |---|---|
 | prompt 拼装 / 导演指令注入位置 | `src/lib/compiler.js` |
 | 对话交互 / 导演弹层 / 诊断卡 / ⚙参数 | `src/views/ChatView.jsx` |
+| 导演遵循自检（探针构造 / 判定口径） | `src/lib/selfCheck.js` |
 | 模型调用 / 路由 / 重试 / 熔断 | `src/lib/providers/*` |
 | 流式封装 / usage/finish 回调 | `src/lib/api.js` |
 | 厂商配置默认值 | `src/lib/util.js`（DEFAULT_SETTINGS） |

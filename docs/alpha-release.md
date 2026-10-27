@@ -1,6 +1,6 @@
 # Android Alpha 版本发布说明
 
-## 当前版本：0.5.0-alpha.14（versionCode 14）
+## 当前版本：0.5.0-alpha.15（versionCode 15）
 
 > 本文档记录发布流程与版本规则；实际版本号以 `android/app/build.gradle` 和设置页页脚为准，发版前务必核对。
 
